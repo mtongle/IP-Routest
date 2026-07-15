@@ -1,0 +1,13 @@
+# Built binary
+RouteTest
+/RouteTest
+
+# Results output
+results/
+
+# Temp checkpoint files
+/tmp/.cmin2-*-checkpoint.json
+
+# OS files
+.DS_Store
+Thumbs.db

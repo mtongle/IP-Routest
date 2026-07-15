@@ -1,0 +1,24 @@
+TASK 6 EVIDENCE: output.go + main.go — Results output and orchestration
+=======================================================================
+Date: 2026-07-15
+Status: PASS
+
+FILES CREATED:
+- output.go (219 lines) — SafeWriter with atomic rename, 4 output formatters
+- main.go (197 lines) — 4-phase pipeline orchestration, signal handler, CLI flags
+- main_test.go (519 lines) — 15 integration/snapshot tests
+
+VERIFICATION:
+- go vet ./...: clean
+- go build ./...: success
+- go test -count=1 -timeout=60s ./...: ALL PASS (15.037s)
+
+FUNCTIONALITY VERIFIED:
+- SafeWriter: thread-safe buffered write, .tmp→os.Rename atomic close ✓
+- WriteCMIN2List: sorted by IP, country lookup, hop count, confidence ✓
+- WriteTCPingSorted: ranked, AvgRTT(ms), LossRate(%) ✓
+- WriteSpeedSorted: RTT lookup, SpeedMbps, Duration ✓
+- WriteRouteAnalysis: hop details, [CMIN2] markers, * for timeouts ✓
+- main.go: 4-phase pipeline, signal handler, stdout summary ✓
+- CLI flags: -top, -all, -resume, -concurrency, -tcping-workers, -input ✓
+- No external deps, no modification of existing source files ✓
