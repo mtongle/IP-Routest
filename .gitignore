@@ -2,8 +2,8 @@
 ALL-*.txt
 
 # Built binary
-RouteTest
-/RouteTest
+IP-Routest
+/IP-Routest
 
 # Results output
 results/
@@ -20,6 +20,9 @@ Thumbs.db
 .vscode/
 *.swp
 *.swo
+
+# OpenCode workspaces
+.omo/
 
 # Go
 *.test

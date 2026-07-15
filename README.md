@@ -1,4 +1,4 @@
-# RouteTest
+# IP-Routest
 
 A Go tool for detecting China Mobile CMIN2 (AS58807) premium routing on a list of IPs, then benchmarking TCP latency and HTTP download speed.
 
@@ -13,14 +13,14 @@ A Go tool for detecting China Mobile CMIN2 (AS58807) premium routing on a list o
 ## Usage
 
 ```bash
-go build -o RouteTest
-./RouteTest -top 50 -concurrency 20 -airport NRT,LAX,HKG
+go build -o IP-Routest
+./IP-Routest -top 50 -concurrency 20 -airport NRT,LAX,HKG
 ```
 
 Use a local file instead of the API:
 
 ```bash
-./RouteTest -input my-ips.txt
+./IP-Routest -input my-ips.txt
 ```
 
 ### Flags
