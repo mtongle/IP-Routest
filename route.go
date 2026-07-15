@@ -19,17 +19,17 @@ import (
 // Hop represents a single traceroute hop.
 type Hop struct {
 	TTL         int
-	IP          net.IP         // nil for * hops
+	IP          net.IP // nil for * hops
 	RTT         time.Duration
-	Unreachable bool            // true when hop has !H, !N, !X suffix
+	Unreachable bool // true when hop has !H, !N, !X suffix
 }
 
 // TraceResult holds the complete traceroute result for one target IP.
 type TraceResult struct {
 	TargetIP net.IP
 	Hops     []Hop
-	Complete bool    // true if traceroute reached target or hit max hops
-	Error    string  // non-empty if traceroute failed
+	Complete bool   // true if traceroute reached target or hit max hops
+	Error    string // non-empty if traceroute failed
 }
 
 // unreachableSuffixes contains the ICMP unreachable signatures that set
@@ -192,10 +192,10 @@ type CheckpointManager struct {
 
 // CheckpointData is serialized to JSON for resume support.
 type CheckpointData struct {
-	CompletedIPs []string `json:"completed_ips"`
-	CompletedSet map[string]bool `json:"-"`          // in-memory only
-	DedupMode    string   `json:"dedup_mode"`
-	StartTime    time.Time `json:"start_time"`
+	CompletedIPs []string        `json:"completed_ips"`
+	CompletedSet map[string]bool `json:"-"` // in-memory only
+	DedupMode    string          `json:"dedup_mode"`
+	StartTime    time.Time       `json:"start_time"`
 }
 
 // NewCheckpointManager creates a CheckpointManager that stores data at
@@ -362,10 +362,10 @@ func ipsSame24(a, b net.IP) bool {
 // TracerouteRunner manages concurrent traceroute execution with checkpoint
 // resume, CGNAT-safe pacing, and context-based cancellation.
 type TracerouteRunner struct {
-	Concurrent    int           // worker count (default 20)
-	Cooldown      time.Duration // between batches (default 10s)
-	PerIPTimeout  time.Duration // per-traceroute timeout (default 30s)
-	Checkpoint    *CheckpointManager
+	Concurrent   int           // worker count (default 20)
+	Cooldown     time.Duration // between batches (default 10s)
+	PerIPTimeout time.Duration // per-traceroute timeout (default 30s)
+	Checkpoint   *CheckpointManager
 }
 
 // NewTracerouteRunner creates a TracerouteRunner with sensible defaults.
@@ -532,14 +532,16 @@ const (
 // RoutePrefixes defines the CIDR ranges for each premium routing network.
 //
 // CMIN2 (AS58807):
-//   Primary range:   223.120.0.0/16  (core backbone)
-//   Secondary range: 223.119.0.0/16  (extended range)
-//   Using /16 as a safe over-estimate to avoid false negatives.
-//   Verified: 23.249.17.25 shows 223.120.141.50 at hop 9 and
-//   223.120.130.34 at hop 10.
+//
+//	Primary range:   223.120.0.0/16  (core backbone)
+//	Secondary range: 223.119.0.0/16  (extended range)
+//	Using /16 as a safe over-estimate to avoid false negatives.
+//	Verified: 23.249.17.25 shows 223.120.141.50 at hop 9 and
+//	223.120.130.34 at hop 10.
 //
 // CN2 GIA (AS4809/CN2-BB):
-//   59.43.0.0/16  (CN2 backbone, confirmed via whois)
+//
+//	59.43.0.0/16  (CN2 backbone, confirmed via whois)
 var RoutePrefixes = map[RouteType][]net.IPNet{
 	RouteCMIN2: {
 		{IP: net.IPv4(223, 120, 0, 0), Mask: net.CIDRMask(16, 32)},
@@ -562,12 +564,12 @@ func isRoutedIP(ip net.IP, prefixes []net.IPNet) bool {
 
 // RouteResult holds the classification result for a single target IP.
 type RouteResult struct {
-	TargetIP  net.IP
-	RouteType RouteType
-	IsRouted  bool
+	TargetIP   net.IP
+	RouteType  RouteType
+	IsRouted   bool
 	Confidence float64 // 0.95 for 2+ matching hops, 0.70 for 1 hop, 0.05 for 0 hops
-	RouteHops []Hop    // Hops that matched the route type's prefixes
-	AllHops   []Hop    // All hops from the traceroute
+	RouteHops  []Hop   // Hops that matched the route type's prefixes
+	AllHops    []Hop   // All hops from the traceroute
 }
 
 // IsRouted returns true if any hop in the trace result has an IP address
@@ -677,5 +679,3 @@ func ClassifyAllRoutes(results map[string]*TraceResult, enabledTypes []RouteType
 
 	return allResults
 }
-
-

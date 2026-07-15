@@ -18,7 +18,7 @@ import (
 type SpeedResult struct {
 	IP        netip.Addr
 	Port      int
-	SpeedMbps float64       // calculated from bytesRead * 8 / elapsed / 1_000_000
+	SpeedMbps float64 // calculated from bytesRead * 8 / elapsed / 1_000_000
 	BytesRead int64
 	Duration  time.Duration // actual elapsed time (may be < 30s on timeout)
 	Error     string        // non-empty if test failed

@@ -98,10 +98,10 @@ func FetchFromAPI(ctx context.Context) (*IPMap, error) {
 
 // IPEntry holds the parsed data for a single IP address.
 type IPEntry struct {
-	Addr      netip.Addr
-	Ports     []int
-	Airports  []string
-	BestPort  int // 443 if present, otherwise the lowest port found
+	Addr     netip.Addr
+	Ports    []int
+	Airports []string
+	BestPort int // 443 if present, otherwise the lowest port found
 }
 
 // IPMap is the central registry of parsed IP entries.
@@ -219,10 +219,10 @@ func (m *IPMap) add(addr netip.Addr, port int, airport string) {
 	}
 
 	entry = &IPEntry{
-		Addr:      addr,
-		Ports:     []int{port},
-		Airports:  []string{airport},
-		BestPort:  port,
+		Addr:     addr,
+		Ports:    []int{port},
+		Airports: []string{airport},
+		BestPort: port,
 	}
 	m.entries[addr] = entry
 	m.order = append(m.order, addr)
