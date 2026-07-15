@@ -136,20 +136,20 @@ func selectBestPort(portResults map[int]*PortRTT) (int, time.Duration, float64, 
 	return bestPort, bestAvgRTT, bestLossRate, bestRTTs
 }
 
-// RunTCPing measures TCP handshake latency for all CMIN2-routed IPs.
+// RunTCPing measures TCP handshake latency for all routed IPs.
 // For each IP, all associated ports are tested, the best port is selected,
 // and one TCPSpeedResult per IP is returned.
 //
 // concurrency controls the number of parallel workers (default: 200).
 // A 2-second cooldown is applied between batches to avoid rate limiting.
-func RunTCPing(cmin2Results []*CMIN2Result, ipMap *IPMap, concurrency int) []*TCPSpeedResult {
+func RunTCPing(routeResults []*RouteResult, ipMap *IPMap, concurrency int) []*TCPSpeedResult {
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	if concurrency <= 0 {
 		concurrency = 200
 	}
 
-	// Convert CMIN2 results to a lookup map keyed by netip.Addr.
+	// Convert route results to a lookup map keyed by netip.Addr.
 	type ipPorts struct {
 		ip    netip.Addr
 		ports []int
@@ -157,8 +157,8 @@ func RunTCPing(cmin2Results []*CMIN2Result, ipMap *IPMap, concurrency int) []*TC
 
 	var targets []ipPorts
 	seen := make(map[netip.Addr]bool)
-	for _, cr := range cmin2Results {
-		addr, ok := netip.AddrFromSlice(cr.TargetIP)
+	for _, rr := range routeResults {
+		addr, ok := netip.AddrFromSlice(rr.TargetIP)
 		if !ok {
 			continue
 		}

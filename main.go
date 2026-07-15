@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"sort"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -23,6 +24,7 @@ var (
 	tcpingWorkers = flag.Int("tcping-workers", 200, "TCPing worker count")
 	airportFilter = flag.String("airport", "", "Filter by IATA airport codes (comma-separated, e.g., NRT,LAX,HKG)")
 	inputFile     = flag.String("input", "", "Input file path(s), comma-separated (default: fetch from https://zip.cm.edu.kg/all.json)")
+	routeFilter   = flag.String("route", "", "Filter by route type: cmin2 or cn2gia (default: both)")
 )
 
 func main() {
@@ -103,14 +105,23 @@ func main() {
 	traceResults := runner.Run(ctx, ipList, *resume)
 	log.Printf("phase 2: traced %d IPs (%v)", len(traceResults), time.Since(phaseStart))
 
-	// Classify for CMIN2 routing.
-	cmin2Results := ClassifyAllResults(traceResults)
-	log.Printf("phase 2: found %d CMIN2-routed IPs", len(cmin2Results))
+	// Classify for premium routing (CMIN2 and/or CN2 GIA).
+	enabledTypes := []RouteType{RouteCMIN2, RouteCN2GIA}
+	if *routeFilter != "" {
+		rt := RouteType(*routeFilter)
+		if rt != RouteCMIN2 && rt != RouteCN2GIA {
+			log.Fatalf("invalid route type %q: must be cmin2 or cn2gia", *routeFilter)
+		}
+		enabledTypes = []RouteType{rt}
+	}
+
+	routeResults := ClassifyAllRoutes(traceResults, enabledTypes)
+	log.Printf("phase 2: found %d routed IPs", len(routeResults))
 
 	// Check for cancellation before proceeding.
 	if ctx.Err() != nil {
 		log.Printf("program cancelled during phase 2")
-		writeResults(ctx, ipMap, traceResults, cmin2Results, nil, nil)
+		writeResults(ctx, ipMap, traceResults, routeResults, enabledTypes, nil, nil)
 		os.Exit(1)
 	}
 
@@ -118,8 +129,8 @@ func main() {
 	// Phase 3: TCP handshake latency (TCPing)
 	// ───────────────────────────────────────────────────────────────
 	phaseStart = time.Now()
-	log.Printf("phase 3: TCPing %d CMIN2 IPs...", len(cmin2Results))
-	tcpingResults := RunTCPing(cmin2Results, ipMap, *tcpingWorkers)
+	log.Printf("phase 3: TCPing %d unique IPs...", len(routeResults))
+	tcpingResults := RunTCPing(routeResults, ipMap, *tcpingWorkers)
 	log.Printf("phase 3: tcping complete, %d results (%v)", len(tcpingResults), time.Since(phaseStart))
 
 	// Sort by AvgRTT ascending (fastest first).
@@ -143,17 +154,18 @@ func main() {
 	// ───────────────────────────────────────────────────────────────
 	// Phase 5: Write results and summary
 	// ───────────────────────────────────────────────────────────────
-	writeResults(ctx, ipMap, traceResults, cmin2Results, tcpingResults, speedResults)
+	writeResults(ctx, ipMap, traceResults, routeResults, enabledTypes, tcpingResults, speedResults)
 
 	log.Printf("total elapsed: %v", time.Since(startTotal))
 }
 
-// writeResults writes all four output files and prints a summary to stdout.
+// writeResults writes all output files and prints a summary to stdout.
 func writeResults(
 	ctx context.Context,
 	ipMap *IPMap,
 	traceResults map[string]*TraceResult,
-	cmin2Results []*CMIN2Result,
+	routeResults []*RouteResult,
+	enabledTypes []RouteType,
 	tcpingResults []*TCPSpeedResult,
 	speedResults []*SpeedResult,
 ) {
@@ -168,36 +180,40 @@ func writeResults(
 		rttLookup[r.IP] = r.AvgRTT
 	}
 
-	// Write File 01: CMIN2-routed IPs.
-	if err := WriteCMIN2List(cmin2Results, ipMap, "results/01-cmin2-list.txt"); err != nil {
-		log.Printf("error writing 01-cmin2-list.txt: %v", err)
+	// Per-type output files (01-list and 04-route-analysis).
+	for _, rt := range enabledTypes {
+		typeResults := filterByType(routeResults, rt)
+		listPath := fmt.Sprintf("results/01-%s-list.txt", rt)
+		analysisPath := fmt.Sprintf("results/04-%s-route-analysis.txt", rt)
+		if err := WriteRouteList(typeResults, rt, ipMap, listPath); err != nil {
+			log.Printf("error writing %s: %v", listPath, err)
+		}
+		if err := WriteRouteAnalysis(typeResults, rt, analysisPath); err != nil {
+			log.Printf("error writing %s: %v", analysisPath, err)
+		}
 	}
 
-	// Write File 02: TCPing results sorted by latency.
+	// File 02: TCPing.
 	if err := WriteTCPingSorted(tcpingResults, "results/02-tcping-sorted.txt"); err != nil {
 		log.Printf("error writing 02-tcping-sorted.txt: %v", err)
 	}
 
-	// Write File 03: Speed test results sorted by speed.
+	// File 03: Speed.
 	if err := WriteSpeedSorted(speedResults, rttLookup, "results/03-speed-sorted.txt"); err != nil {
 		log.Printf("error writing 03-speed-sorted.txt: %v", err)
 	}
 
-	// Write File 04: Route analysis.
-	if err := WriteRouteAnalysis(cmin2Results, "results/04-route-analysis.txt"); err != nil {
-		log.Printf("error writing 04-route-analysis.txt: %v", err)
-	}
-
-	// ───────────────────────────────────────────────────────────────
-	// Stdout summary
-	// ───────────────────────────────────────────────────────────────
+	// Summary
 	fmt.Println("\n=== Results Summary ===")
 	fmt.Printf("Total unique IPs:    %d\n", ipMap.Len())
 	fmt.Printf("IPs traced:          %d\n", len(traceResults))
-	fmt.Printf("CMIN2 IPs found:     %d\n", len(cmin2Results))
+	for _, rt := range enabledTypes {
+		fmt.Printf("%s IPs found:    %d\n", strings.ToUpper(string(rt)), countByType(routeResults, rt))
+	}
 	fmt.Printf("TCPing results:      %d\n", len(tcpingResults))
 	fmt.Printf("Speed test results:  %d\n", len(speedResults))
 
+	// Top 5 fastest
 	if len(speedResults) > 0 {
 		fmt.Println("\nTop 5 fastest IPs:")
 		limit := 5
@@ -213,11 +229,36 @@ func writeResults(
 		}
 	}
 
+	// Files list
 	fmt.Println("\nFiles written:")
-	fmt.Println("  results/01-cmin2-list.txt")
+	for _, rt := range enabledTypes {
+		fmt.Printf("  results/01-%s-list.txt\n", rt)
+		fmt.Printf("  results/04-%s-route-analysis.txt\n", rt)
+	}
 	fmt.Println("  results/02-tcping-sorted.txt")
 	fmt.Println("  results/03-speed-sorted.txt")
-	fmt.Println("  results/04-route-analysis.txt")
+}
+
+// filterByType returns route results that match the given route type.
+func filterByType(results []*RouteResult, rt RouteType) []*RouteResult {
+	var filtered []*RouteResult
+	for _, r := range results {
+		if r.RouteType == rt {
+			filtered = append(filtered, r)
+		}
+	}
+	return filtered
+}
+
+// countByType returns the number of route results that match the given route type.
+func countByType(results []*RouteResult, rt RouteType) int {
+	count := 0
+	for _, r := range results {
+		if r.RouteType == rt {
+			count++
+		}
+	}
+	return count
 }
 
 // splitAndTrim splits s by sep and trims whitespace from each resulting token.

@@ -452,9 +452,9 @@ func TestCheckpointFileNotFound(t *testing.T) {
 	os.Remove(cm.checkpointPath)
 }
 
-// ────────────────────── CMIN2 detection tests ──────────────────────
+// ────────────────────── Route detection tests ──────────────────────
 
-func TestIsCMIN2_Positive(t *testing.T) {
+func TestIsRouted_CMIN2_Positive(t *testing.T) {
 	// Given: a trace result with a CMIN2 hop.
 	tr := &TraceResult{
 		TargetIP: net.ParseIP("23.249.17.25"),
@@ -465,15 +465,15 @@ func TestIsCMIN2_Positive(t *testing.T) {
 	}
 
 	// When
-	got := tr.IsCMIN2()
+	got := tr.IsRouted(RouteCMIN2)
 
 	// Then
 	if !got {
-		t.Error("IsCMIN2() = false, want true (hop 223.120.141.50 is in CMIN2 range)")
+		t.Error("IsRouted(RouteCMIN2) = false, want true (hop 223.120.141.50 is in CMIN2 range)")
 	}
 }
 
-func TestIsCMIN2_Negative(t *testing.T) {
+func TestIsRouted_CMIN2_Negative(t *testing.T) {
 	// Given: a trace result with only non-CMIN2 hops.
 	tr := &TraceResult{
 		TargetIP: net.ParseIP("1.1.1.1"),
@@ -484,15 +484,15 @@ func TestIsCMIN2_Negative(t *testing.T) {
 	}
 
 	// When
-	got := tr.IsCMIN2()
+	got := tr.IsRouted(RouteCMIN2)
 
 	// Then
 	if got {
-		t.Error("IsCMIN2() = true, want false (1.1.1.1 is not in CMIN2 range)")
+		t.Error("IsRouted(RouteCMIN2) = true, want false (1.1.1.1 is not in CMIN2 range)")
 	}
 }
 
-func TestIsCMIN2_SecondaryRange(t *testing.T) {
+func TestIsRouted_CMIN2_SecondaryRange(t *testing.T) {
 	// Given: a trace result with a hop in the secondary CMIN2 range.
 	tr := &TraceResult{
 		TargetIP: net.ParseIP("10.0.0.1"),
@@ -502,15 +502,15 @@ func TestIsCMIN2_SecondaryRange(t *testing.T) {
 	}
 
 	// When
-	got := tr.IsCMIN2()
+	got := tr.IsRouted(RouteCMIN2)
 
 	// Then
 	if !got {
-		t.Error("IsCMIN2() = false, want true (223.119.1.1 is in secondary CMIN2 range)")
+		t.Error("IsRouted(RouteCMIN2) = false, want true (223.119.1.1 is in secondary CMIN2 range)")
 	}
 }
 
-func TestIsCMIN2_NotMatched(t *testing.T) {
+func TestIsRouted_CMIN2_NotMatched(t *testing.T) {
 	// Given: a trace result with a hop in a nearby but non-CMIN2 range.
 	tr := &TraceResult{
 		TargetIP: net.ParseIP("10.0.0.1"),
@@ -520,15 +520,15 @@ func TestIsCMIN2_NotMatched(t *testing.T) {
 	}
 
 	// When
-	got := tr.IsCMIN2()
+	got := tr.IsRouted(RouteCMIN2)
 
 	// Then
 	if got {
-		t.Error("IsCMIN2() = true, want false (223.118.1.1 is regular CMI, not CMIN2)")
+		t.Error("IsRouted(RouteCMIN2) = true, want false (223.118.1.1 is regular CMI, not CMIN2)")
 	}
 }
 
-func TestCountCMIN2Hops(t *testing.T) {
+func TestCountRouteHops_CMIN2(t *testing.T) {
 	// Given: hops with 2 CMIN2 and 3 non-CMIN2 IPs.
 	hops := []Hop{
 		{TTL: 1, IP: net.ParseIP("192.168.1.1")},
@@ -539,15 +539,15 @@ func TestCountCMIN2Hops(t *testing.T) {
 	}
 
 	// When
-	count := CountCMIN2Hops(hops)
+	count := CountRouteHops(hops, RouteCMIN2)
 
 	// Then
 	if count != 2 {
-		t.Errorf("CountCMIN2Hops = %d, want 2", count)
+		t.Errorf("CountRouteHops(hops, RouteCMIN2) = %d, want 2", count)
 	}
 }
 
-func TestClassifyTraceResult_HighConfidence(t *testing.T) {
+func TestClassifyRouteResult_CMIN2_HighConfidence(t *testing.T) {
 	// Given: a trace result with 2 CMIN2 hops.
 	tr := &TraceResult{
 		TargetIP: net.ParseIP("23.249.17.25"),
@@ -558,17 +558,20 @@ func TestClassifyTraceResult_HighConfidence(t *testing.T) {
 	}
 
 	// When
-	result := ClassifyTraceResult(tr)
+	result := ClassifyRouteResult(tr, RouteCMIN2)
 
 	// Then
-	if !result.IsCMIN2 {
-		t.Error("IsCMIN2 = false, want true")
+	if !result.IsRouted {
+		t.Error("IsRouted = false, want true")
+	}
+	if result.RouteType != RouteCMIN2 {
+		t.Errorf("RouteType = %v, want %v", result.RouteType, RouteCMIN2)
 	}
 	if result.Confidence != 0.95 {
 		t.Errorf("Confidence = %v, want 0.95", result.Confidence)
 	}
-	if len(result.CMIN2Hops) != 2 {
-		t.Errorf("CMIN2Hops count = %d, want 2", len(result.CMIN2Hops))
+	if len(result.RouteHops) != 2 {
+		t.Errorf("RouteHops count = %d, want 2", len(result.RouteHops))
 	}
 	if !result.TargetIP.Equal(net.ParseIP("23.249.17.25")) {
 		t.Errorf("TargetIP = %v, want 23.249.17.25", result.TargetIP)
@@ -578,7 +581,7 @@ func TestClassifyTraceResult_HighConfidence(t *testing.T) {
 	}
 }
 
-func TestClassifyTraceResult_LowConfidence(t *testing.T) {
+func TestClassifyRouteResult_CMIN2_LowConfidence(t *testing.T) {
 	// Given: a trace result with 1 CMIN2 hop.
 	tr := &TraceResult{
 		TargetIP: net.ParseIP("10.0.0.1"),
@@ -590,21 +593,21 @@ func TestClassifyTraceResult_LowConfidence(t *testing.T) {
 	}
 
 	// When
-	result := ClassifyTraceResult(tr)
+	result := ClassifyRouteResult(tr, RouteCMIN2)
 
 	// Then
-	if !result.IsCMIN2 {
-		t.Error("IsCMIN2 = false, want true")
+	if !result.IsRouted {
+		t.Error("IsRouted = false, want true")
 	}
 	if result.Confidence != 0.70 {
 		t.Errorf("Confidence = %v, want 0.70", result.Confidence)
 	}
-	if len(result.CMIN2Hops) != 1 {
-		t.Errorf("CMIN2Hops count = %d, want 1", len(result.CMIN2Hops))
+	if len(result.RouteHops) != 1 {
+		t.Errorf("RouteHops count = %d, want 1", len(result.RouteHops))
 	}
 }
 
-func TestClassifyTraceResult_NotCMIN2(t *testing.T) {
+func TestClassifyRouteResult_CMIN2_NotRouted(t *testing.T) {
 	// Given: a trace result with no CMIN2 hops.
 	tr := &TraceResult{
 		TargetIP: net.ParseIP("1.1.1.1"),
@@ -615,44 +618,44 @@ func TestClassifyTraceResult_NotCMIN2(t *testing.T) {
 	}
 
 	// When
-	result := ClassifyTraceResult(tr)
+	result := ClassifyRouteResult(tr, RouteCMIN2)
 
 	// Then
-	if result.IsCMIN2 {
-		t.Error("IsCMIN2 = true, want false")
+	if result.IsRouted {
+		t.Error("IsRouted = true, want false")
 	}
 	if result.Confidence != 0.05 {
 		t.Errorf("Confidence = %v, want 0.05", result.Confidence)
 	}
-	if len(result.CMIN2Hops) != 0 {
-		t.Errorf("CMIN2Hops count = %d, want 0", len(result.CMIN2Hops))
+	if len(result.RouteHops) != 0 {
+		t.Errorf("RouteHops count = %d, want 0", len(result.RouteHops))
 	}
 }
 
-func TestClassifyTraceResult_EmptyHops(t *testing.T) {
+func TestClassifyRouteResult_CMIN2_EmptyHops(t *testing.T) {
 	// Given: a trace result with no hops.
 	tr := &TraceResult{
 		TargetIP: net.ParseIP("10.0.0.1"),
 	}
 
 	// When
-	result := ClassifyTraceResult(tr)
+	result := ClassifyRouteResult(tr, RouteCMIN2)
 
 	// Then
-	if result.IsCMIN2 {
-		t.Error("IsCMIN2 = true, want false for empty hops")
+	if result.IsRouted {
+		t.Error("IsRouted = true, want false for empty hops")
 	}
 	if result.Confidence != 0.05 {
 		t.Errorf("Confidence = %v, want 0.05", result.Confidence)
 	}
-	if len(result.CMIN2Hops) != 0 {
-		t.Errorf("CMIN2Hops count = %d, want 0", len(result.CMIN2Hops))
+	if len(result.RouteHops) != 0 {
+		t.Errorf("RouteHops count = %d, want 0", len(result.RouteHops))
 	}
 }
 
 func TestCMIN2Prefixes_Contains(t *testing.T) {
 	// Given: the CMIN2 prefix table.
-	prefixes := CMIN2Prefixes
+	prefixes := RoutePrefixes[RouteCMIN2]
 
 	tests := []struct {
 		name string

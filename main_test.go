@@ -72,7 +72,7 @@ func TestMainHelp(t *testing.T) {
 	output := string(out)
 
 	// Then: all flag names appear in the usage output.
-	expectedFlags := []string{"-top", "-all", "-resume", "-concurrency", "-tcping-workers", "-input", "-airport"}
+	expectedFlags := []string{"-top", "-all", "-resume", "-concurrency", "-tcping-workers", "-input", "-airport", "-route"}
 	for _, flag := range expectedFlags {
 		if !strings.Contains(output, flag) {
 			t.Errorf("usage output missing flag %q", flag)
@@ -81,11 +81,11 @@ func TestMainHelp(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// TestWriteCMIN2List — write File 01 and verify content
+// TestWriteRouteList — write File 01 and verify content
 // ---------------------------------------------------------------------------
 
-func TestWriteCMIN2List(t *testing.T) {
-	// Given: sample CMIN2 results with an IPMap for country lookup.
+func TestWriteRouteList(t *testing.T) {
+	// Given: sample route results with an IPMap for country lookup.
 	dir := t.TempDir()
 	path := filepath.Join(dir, "01-cmin2-list.txt")
 
@@ -93,10 +93,11 @@ func TestWriteCMIN2List(t *testing.T) {
 	ipMap.add(netip.MustParseAddr("101.99.76.88"), 443, "AMS")
 	ipMap.add(netip.MustParseAddr("23.249.17.25"), 443, "DFW")
 
-	results := []*CMIN2Result{
+	results := []*RouteResult{
 		{
 			TargetIP:   net.ParseIP("101.99.76.88"),
-			IsCMIN2:    true,
+			RouteType:  RouteCMIN2,
+			IsRouted:   true,
 			Confidence: 0.95,
 			AllHops: []Hop{
 				{TTL: 1, IP: net.ParseIP("192.168.1.1")},
@@ -106,7 +107,8 @@ func TestWriteCMIN2List(t *testing.T) {
 		},
 		{
 			TargetIP:   net.ParseIP("23.249.17.25"),
-			IsCMIN2:    true,
+			RouteType:  RouteCMIN2,
+			IsRouted:   true,
 			Confidence: 0.70,
 			AllHops: []Hop{
 				{TTL: 9, IP: net.ParseIP("223.120.141.50")},
@@ -115,7 +117,7 @@ func TestWriteCMIN2List(t *testing.T) {
 	}
 
 	// When: write the file.
-	if err := WriteCMIN2List(results, ipMap, path); err != nil {
+	if err := WriteRouteList(results, RouteCMIN2, ipMap, path); err != nil {
 		t.Fatal(err)
 	}
 
@@ -141,7 +143,7 @@ func TestWriteCMIN2List(t *testing.T) {
 	if !strings.Contains(content, "Total: 2") {
 		t.Error("missing Total: 2 header")
 	}
-	if !strings.Contains(content, "CMIN2-routed IPs") {
+	if !strings.Contains(content, "cmin2-routed IPs") {
 		t.Error("missing title header")
 	}
 }
@@ -258,13 +260,14 @@ func TestWriteSpeedSorted(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestWriteRouteAnalysis(t *testing.T) {
-	// Given: sample CMIN2 result with mixed hops (one CMIN2, one regular).
+	// Given: sample route result with mixed hops.
 	dir := t.TempDir()
 	path := filepath.Join(dir, "04-route-analysis.txt")
 
-	results := []*CMIN2Result{
+	results := []*RouteResult{
 		{
-			TargetIP: net.ParseIP("101.99.76.88"),
+			TargetIP:  net.ParseIP("101.99.76.88"),
+			RouteType: RouteCMIN2,
 			AllHops: []Hop{
 				{TTL: 1, IP: net.ParseIP("192.168.1.1"), RTT: 1*time.Millisecond + 234*time.Microsecond},
 				{TTL: 2, IP: net.ParseIP("10.0.0.1"), RTT: 5 * time.Millisecond},
@@ -274,7 +277,7 @@ func TestWriteRouteAnalysis(t *testing.T) {
 	}
 
 	// When: write the file.
-	if err := WriteRouteAnalysis(results, path); err != nil {
+	if err := WriteRouteAnalysis(results, RouteCMIN2, path); err != nil {
 		t.Fatal(err)
 	}
 
@@ -393,10 +396,10 @@ func TestSafeWriterWriteBytes(t *testing.T) {
 // TestWriteFunctions_empty_input — empty slices produce valid headers
 // ---------------------------------------------------------------------------
 
-func TestWriteCMIN2List_empty(t *testing.T) {
+func TestWriteRouteList_empty(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "01-empty.txt")
-	if err := WriteCMIN2List(nil, NewIPMap(), path); err != nil {
+	if err := WriteRouteList(nil, RouteCMIN2, NewIPMap(), path); err != nil {
 		t.Fatal(err)
 	}
 	data, _ := os.ReadFile(path)
@@ -432,7 +435,7 @@ func TestWriteSpeedSorted_empty(t *testing.T) {
 func TestWriteRouteAnalysis_empty(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "04-empty.txt")
-	if err := WriteRouteAnalysis(nil, path); err != nil {
+	if err := WriteRouteAnalysis(nil, RouteCMIN2, path); err != nil {
 		t.Fatal(err)
 	}
 	data, _ := os.ReadFile(path)
