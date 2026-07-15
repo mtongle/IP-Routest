@@ -21,7 +21,8 @@ var (
 	resume        = flag.Bool("resume", true, "Resume traceroute from checkpoint")
 	traceWorkers  = flag.Int("concurrency", 20, "Traceroute worker count")
 	tcpingWorkers = flag.Int("tcping-workers", 200, "TCPing worker count")
-	inputFile     = flag.String("input", "ALL-2026-07-15.txt", "Input file path")
+	airportFilter = flag.String("airport", "", "Filter by IATA airport codes (comma-separated, e.g., NRT,LAX,HKG)")
+	inputFile     = flag.String("input", "", "Input file path(s), comma-separated (default: fetch from https://zip.cm.edu.kg/all.json)")
 )
 
 func main() {
@@ -45,15 +46,38 @@ func main() {
 	var phaseStart time.Time
 
 	// ───────────────────────────────────────────────────────────────
-	// Phase 1: Parse IPs from input file
+	// Phase 1: Fetch IP data from API or parse from file(s)
 	// ───────────────────────────────────────────────────────────────
 	phaseStart = time.Now()
-	log.Printf("phase 1: parsing %s...", *inputFile)
-	ipMap, err := ParseFile(*inputFile)
-	if err != nil {
-		log.Fatalf("parse failed: %v", err)
+
+	var ipMap *IPMap
+	var err error
+	if *inputFile != "" {
+		files := splitAndTrim(*inputFile, ',')
+		log.Printf("phase 1: parsing %d file(s)...", len(files))
+		ipMap, err = ParseFiles(files...)
+		if err != nil {
+			log.Fatalf("parse failed: %v", err)
+		}
+	} else {
+		log.Printf("phase 1: fetching IP data from API...")
+		ipMap, err = FetchFromAPI(ctx)
+		if err != nil {
+			log.Fatalf("API fetch failed: %v", err)
+		}
 	}
-	log.Printf("phase 1: parsed %d unique IPs (%v)", ipMap.Len(), time.Since(phaseStart))
+	log.Printf("phase 1: got %d unique IPs (%v)", ipMap.Len(), time.Since(phaseStart))
+
+	// Apply airport (IATA) filter if specified.
+	if *airportFilter != "" {
+		airports := splitAndTrim(*airportFilter, ',')
+		log.Printf("airport filter: %v", airports)
+		ipMap = ipMap.FilterByAirports(airports)
+		log.Printf("after airport filter: %d unique IPs", ipMap.Len())
+		if ipMap.Len() == 0 {
+			log.Fatalf("no IPs match the specified airport codes: %v", airports)
+		}
+	}
 
 	// ───────────────────────────────────────────────────────────────
 	// Phase 2: Traceroute + CMIN2 detection
@@ -194,4 +218,41 @@ func writeResults(
 	fmt.Println("  results/02-tcping-sorted.txt")
 	fmt.Println("  results/03-speed-sorted.txt")
 	fmt.Println("  results/04-route-analysis.txt")
+}
+
+// splitAndTrim splits s by sep and trims whitespace from each resulting token.
+// Empty tokens are omitted from the result.
+func splitAndTrim(s string, sep rune) []string {
+	if s == "" {
+		return nil
+	}
+	var result []string
+	start := 0
+	for i, ch := range s {
+		if ch == sep {
+			token := trimSpace(s[start:i])
+			if token != "" {
+				result = append(result, token)
+			}
+			start = i + 1
+		}
+	}
+	token := trimSpace(s[start:])
+	if token != "" {
+		result = append(result, token)
+	}
+	return result
+}
+
+// trimSpace is a small helper to avoid importing strings for a single call
+// at the top level. Returns s with leading and trailing whitespace removed.
+func trimSpace(s string) string {
+	lo, hi := 0, len(s)
+	for lo < hi && (s[lo] == ' ' || s[lo] == '\t' || s[lo] == '\n' || s[lo] == '\r') {
+		lo++
+	}
+	for hi > lo && (s[hi-1] == ' ' || s[hi-1] == '\t' || s[hi-1] == '\n' || s[hi-1] == '\r') {
+		hi--
+	}
+	return s[lo:hi]
 }

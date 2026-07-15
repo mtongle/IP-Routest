@@ -94,13 +94,13 @@ func WriteCMIN2List(results []*CMIN2Result, ipMap *IPMap, path string) error {
 	})
 
 	sw.WriteString(fmt.Sprintf("# CMIN2-routed IPs - %s\n", timestamp))
-	sw.WriteString("# Format: IP Country CMIN2HopCount Confidence\n")
+	sw.WriteString("# Format: IP Airport CMIN2HopCount Confidence\n")
 	sw.WriteString(fmt.Sprintf("# Total: %d\n", len(sorted)))
 
 	for _, r := range sorted {
-		country := getCountry(r.TargetIP, ipMap)
+		airport := getAirport(r.TargetIP, ipMap)
 		hopCount := CountCMIN2Hops(r.AllHops)
-		sw.WriteString(fmt.Sprintf("%s %s %d %.2f\n", r.TargetIP, country, hopCount, r.Confidence))
+		sw.WriteString(fmt.Sprintf("%s %s %d %.2f\n", r.TargetIP, airport, hopCount, r.Confidence))
 	}
 
 	return nil
@@ -183,13 +183,8 @@ func WriteRouteAnalysis(results []*CMIN2Result, path string) error {
 			}
 
 			marker := ""
-			if hop.IP != nil {
-				for _, prefix := range CMIN2Prefixes {
-					if prefix.Contains(hop.IP) {
-						marker = " [CMIN2]"
-						break
-					}
-				}
+			if hop.IP != nil && isCMIN2IP(hop.IP) {
+				marker = " [CMIN2]"
 			}
 
 			sw.WriteString(fmt.Sprintf(" Hop %d %s %.3f%s\n", hop.TTL, ipStr, rttMs, marker))
@@ -203,17 +198,17 @@ func WriteRouteAnalysis(results []*CMIN2Result, path string) error {
 // Helpers
 // ---------------------------------------------------------------------------
 
-// getCountry returns the first country code for the given IP from ipMap.
-// Returns "??" if the IP is not found or has no country data.
-func getCountry(ip net.IP, ipMap *IPMap) string {
+// getAirport returns the first airport (IATA) code for the given IP from ipMap.
+// Returns "??" if the IP is not found or has no airport data.
+func getAirport(ip net.IP, ipMap *IPMap) string {
 	addr, ok := netip.AddrFromSlice(ip)
 	if !ok {
 		return "??"
 	}
 	addr = addr.Unmap()
-	countries := ipMap.GetCountries(addr)
-	if len(countries) == 0 {
+	airports := ipMap.GetAirports(addr)
+	if len(airports) == 0 {
 		return "??"
 	}
-	return countries[0]
+	return airports[0]
 }

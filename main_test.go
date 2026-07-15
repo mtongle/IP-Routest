@@ -1,7 +1,6 @@
 package main
 
 import (
-	"log"
 	"net"
 	"net/netip"
 	"os"
@@ -73,7 +72,7 @@ func TestMainHelp(t *testing.T) {
 	output := string(out)
 
 	// Then: all flag names appear in the usage output.
-	expectedFlags := []string{"-top", "-all", "-resume", "-concurrency", "-tcping-workers", "-input"}
+	expectedFlags := []string{"-top", "-all", "-resume", "-concurrency", "-tcping-workers", "-input", "-airport"}
 	for _, flag := range expectedFlags {
 		if !strings.Contains(output, flag) {
 			t.Errorf("usage output missing flag %q", flag)
@@ -91,8 +90,8 @@ func TestWriteCMIN2List(t *testing.T) {
 	path := filepath.Join(dir, "01-cmin2-list.txt")
 
 	ipMap := NewIPMap()
-	ipMap.add(netip.MustParseAddr("101.99.76.88"), 443, "NL")
-	ipMap.add(netip.MustParseAddr("23.249.17.25"), 443, "US")
+	ipMap.add(netip.MustParseAddr("101.99.76.88"), 443, "AMS")
+	ipMap.add(netip.MustParseAddr("23.249.17.25"), 443, "DFW")
 
 	results := []*CMIN2Result{
 		{
@@ -130,14 +129,14 @@ func TestWriteCMIN2List(t *testing.T) {
 	if !strings.Contains(content, "101.99.76.88") {
 		t.Error("missing IP 101.99.76.88")
 	}
-	if !strings.Contains(content, "NL") {
-		t.Error("missing country NL for 101.99.76.88")
+	if !strings.Contains(content, "AMS") {
+		t.Error("missing airport AMS for 101.99.76.88")
 	}
 	if !strings.Contains(content, "23.249.17.25") {
 		t.Error("missing IP 23.249.17.25")
 	}
-	if !strings.Contains(content, "US") {
-		t.Error("missing country US for 23.249.17.25")
+	if !strings.Contains(content, "DFW") {
+		t.Error("missing airport DFW for 23.249.17.25")
 	}
 	if !strings.Contains(content, "Total: 2") {
 		t.Error("missing Total: 2 header")
@@ -443,24 +442,24 @@ func TestWriteRouteAnalysis_empty(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// TestGetCountry — helper that looks up country from IPMap
+// TestGetAirport — helper that looks up airport (IATA) code from IPMap
 // ---------------------------------------------------------------------------
 
-func TestGetCountry(t *testing.T) {
+func TestGetAirport(t *testing.T) {
 	// Given: an IPMap with known entries.
 	ipMap := NewIPMap()
-	ipMap.add(netip.MustParseAddr("101.99.76.88"), 443, "NL")
-	ipMap.add(netip.MustParseAddr("23.249.17.25"), 443, "US")
+	ipMap.add(netip.MustParseAddr("101.99.76.88"), 443, "AMS")
+	ipMap.add(netip.MustParseAddr("23.249.17.25"), 443, "DFW")
 
 	// When/Then: lookup by net.IP.
-	if c := getCountry(net.ParseIP("101.99.76.88"), ipMap); c != "NL" {
-		t.Errorf("getCountry = %q, want %q", c, "NL")
+	if c := getAirport(net.ParseIP("101.99.76.88"), ipMap); c != "AMS" {
+		t.Errorf("getAirport = %q, want %q", c, "AMS")
 	}
-	if c := getCountry(net.ParseIP("23.249.17.25"), ipMap); c != "US" {
-		t.Errorf("getCountry = %q, want %q", c, "US")
+	if c := getAirport(net.ParseIP("23.249.17.25"), ipMap); c != "DFW" {
+		t.Errorf("getAirport = %q, want %q", c, "DFW")
 	}
-	if c := getCountry(net.ParseIP("1.2.3.4"), ipMap); c != "??" {
-		t.Errorf("getCountry for unknown IP = %q, want %q", c, "??")
+	if c := getAirport(net.ParseIP("1.2.3.4"), ipMap); c != "??" {
+		t.Errorf("getAirport for unknown IP = %q, want %q", c, "??")
 	}
 }
 
@@ -510,10 +509,5 @@ func TestSafeWriterConcurrentWrite(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// init — suppress log output during tests
+// init — suppress log output during tests (defined in parse_test.go)
 // ---------------------------------------------------------------------------
-
-func init() {
-	log.SetFlags(0)
-	log.SetOutput(testLogWriter{})
-}

@@ -203,15 +203,15 @@ func TestParseFile_deduplicates_by_IP(t *testing.T) {
 		t.Errorf("23.249.17.25 BestPort = %d, want 443", entry.BestPort)
 	}
 
-	// 103.152.113.60 — ports [443, 8443] (no 443 duplicate), countries [DE, US]
+	// 103.152.113.60 — ports [443, 8443] (no 443 duplicate), airports [DE, US]
 	ip3 := netip.MustParseAddr("103.152.113.60")
 	ports3 := m.GetPorts(ip3)
 	if len(ports3) != 2 || ports3[0] != 443 || ports3[1] != 8443 {
 		t.Errorf("103.152.113.60 ports = %v, want [443 8443]", ports3)
 	}
-	countries3 := m.GetCountries(ip3)
-	if len(countries3) != 2 || countries3[0] != "DE" || countries3[1] != "US" {
-		t.Errorf("103.152.113.60 countries = %v, want [DE US]", countries3)
+	airports3 := m.GetAirports(ip3)
+	if len(airports3) != 2 || airports3[0] != "DE" || airports3[1] != "US" {
+		t.Errorf("103.152.113.60 airports = %v, want [DE US]", airports3)
 	}
 }
 
@@ -400,6 +400,42 @@ func TestParseFullFile_known_IP_has_expected_ports(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// TestFetchFromAPI — integration test with real API
+// ---------------------------------------------------------------------------
+
+func TestFetchFromAPI(t *testing.T) {
+	if os.Getenv("OPENCODE_NETWORK_TEST") != "1" {
+		t.Skip("set OPENCODE_NETWORK_TEST=1 to run API integration test")
+	}
+
+	ctx := t.Context()
+	m, err := FetchFromAPI(ctx)
+	if err != nil {
+		t.Fatalf("FetchFromAPI failed: %v", err)
+	}
+
+	if m.Len() == 0 {
+		t.Fatal("FetchFromAPI returned empty IPMap")
+	}
+
+	// Verify a known IP from the API response.
+	addr := netip.MustParseAddr("159.60.146.82")
+	entry, ok := m.entries[addr]
+	if !ok {
+		t.Error("expected IP 159.60.146.82 to be present")
+	} else {
+		airports := entry.Airports
+		if len(airports) == 0 {
+			t.Error("expected at least one airport code for 159.60.146.82")
+		} else if airports[0] != "DFW" {
+			t.Errorf("airport for 159.60.146.82 = %q, want %q", airports[0], "DFW")
+		}
+	}
+
+	t.Logf("FetchFromAPI returned %d unique IPs", m.Len())
+}
+
+// ---------------------------------------------------------------------------
 // TestEdgeCases
 // ---------------------------------------------------------------------------
 
@@ -427,9 +463,9 @@ func TestEdgeCases_same_IP_same_port_no_duplicate(t *testing.T) {
 		t.Errorf("ports = %v, want [443] (no duplicate)", ports)
 	}
 	// Countries should have both
-	countries := m.GetCountries(ip)
-	if len(countries) != 2 {
-		t.Errorf("countries = %v, want [NL US]", countries)
+	airports := m.GetAirports(ip)
+	if len(airports) != 2 {
+		t.Errorf("airports = %v, want [NL US]", airports)
 	}
 }
 
@@ -495,39 +531,39 @@ func TestGetPorts_unknown_IP_returns_nil(t *testing.T) {
 	}
 }
 
-func TestGetCountries_unknown_IP_returns_nil(t *testing.T) {
+func TestGetAirports_unknown_IP_returns_nil(t *testing.T) {
 	// Given
 	m := NewIPMap()
 	ip := netip.MustParseAddr("1.2.3.4")
 
 	// When
-	countries := m.GetCountries(ip)
+	airports := m.GetAirports(ip)
 
 	// Then
-	if countries != nil {
-		t.Errorf("expected nil for unknown IP, got %v", countries)
+	if airports != nil {
+		t.Errorf("expected nil for unknown IP, got %v", airports)
 	}
 }
 
-func TestGetCountries_returns_sorted(t *testing.T) {
+func TestGetAirports_returns_sorted(t *testing.T) {
 	// Given
 	m := NewIPMap()
 	ip := netip.MustParseAddr("104.16.0.1")
-	m.add(ip, 443, "US")
-	m.add(ip, 443, "NL")
-	m.add(ip, 443, "DE")
+	m.add(ip, 443, "DFW")
+	m.add(ip, 443, "NRT")
+	m.add(ip, 443, "HKG")
 
 	// When
-	countries := m.GetCountries(ip)
+	airports := m.GetAirports(ip)
 
 	// Then
-	want := []string{"DE", "NL", "US"}
-	if len(countries) != len(want) {
-		t.Fatalf("len(countries) = %d, want %d; got %v", len(countries), len(want), countries)
+	want := []string{"DFW", "HKG", "NRT"}
+	if len(airports) != len(want) {
+		t.Fatalf("len(airports) = %d, want %d; got %v", len(airports), len(want), airports)
 	}
 	for i := range want {
-		if countries[i] != want[i] {
-			t.Errorf("countries[%d] = %s, want %s; full = %v", i, countries[i], want[i], countries)
+		if airports[i] != want[i] {
+			t.Errorf("airports[%d] = %s, want %s; full = %v", i, airports[i], want[i], airports)
 		}
 	}
 }
@@ -607,6 +643,268 @@ func TestNewIPMap_Len_reflects_added_entries(t *testing.T) {
 	m.add(netip.MustParseAddr("5.6.7.8"), 443, "US") // different IP
 	if m.Len() != 2 {
 		t.Errorf("after adding second IP: Len=%d, want 2", m.Len())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestFilterByAirports
+// ---------------------------------------------------------------------------
+
+func TestFilterByAirports_filters_by_IATA_code(t *testing.T) {
+	// Given: an IPMap with IPs from multiple airports.
+	m := NewIPMap()
+	m.add(netip.MustParseAddr("1.2.3.4"), 443, "DFW")
+	m.add(netip.MustParseAddr("5.6.7.8"), 443, "NRT")
+	m.add(netip.MustParseAddr("9.10.11.12"), 8443, "DFW")
+	m.add(netip.MustParseAddr("13.14.15.16"), 443, "HKG")
+	m.add(netip.MustParseAddr("17.18.19.20"), 2053, "LAX")
+
+	// When: filter by DFW and NRT.
+	filtered := m.FilterByAirports([]string{"DFW", "NRT"})
+
+	// Then: only DFW and NRT IPs remain.
+	if filtered.Len() != 3 {
+		t.Fatalf("expected 3 IPs after filter, got %d", filtered.Len())
+	}
+
+	for _, addr := range []string{"1.2.3.4", "5.6.7.8", "9.10.11.12"} {
+		parsed := netip.MustParseAddr(addr)
+		if _, ok := filtered.entries[parsed]; !ok {
+			t.Errorf("expected IP %s to be present after filter", addr)
+		}
+	}
+	// HKG and LAX should be gone.
+	for _, addr := range []string{"13.14.15.16", "17.18.19.20"} {
+		parsed := netip.MustParseAddr(addr)
+		if _, ok := filtered.entries[parsed]; ok {
+			t.Errorf("expected IP %s to be absent after filter", addr)
+		}
+	}
+}
+
+func TestFilterByAirports_empty_filter_returns_original(t *testing.T) {
+	// Given: an IPMap with entries.
+	m := NewIPMap()
+	m.add(netip.MustParseAddr("1.2.3.4"), 443, "DFW")
+
+	// When: empty filter.
+	filtered := m.FilterByAirports(nil)
+
+	// Then: same map pointer returned.
+	if filtered != m {
+		t.Error("expected same map pointer for empty filter")
+	}
+}
+
+func TestFilterByAirports_no_match_returns_empty_map(t *testing.T) {
+	// Given: an IPMap with entries.
+	m := NewIPMap()
+	m.add(netip.MustParseAddr("1.2.3.4"), 443, "DFW")
+	m.add(netip.MustParseAddr("5.6.7.8"), 443, "NRT")
+
+	// When: filter for an airport that doesn't exist.
+	filtered := m.FilterByAirports([]string{"XXX"})
+
+	// Then: empty map.
+	if filtered.Len() != 0 {
+		t.Errorf("expected 0 IPs, got %d", filtered.Len())
+	}
+}
+
+func TestFilterByAirports_case_insensitive(t *testing.T) {
+	// Given: an IPMap with uppercase airport codes.
+	m := NewIPMap()
+	m.add(netip.MustParseAddr("1.2.3.4"), 443, "DFW")
+
+	// When: filter with lowercase.
+	filtered := m.FilterByAirports([]string{"dfw"})
+
+	// Then: still matches.
+	if filtered.Len() != 1 {
+		t.Errorf("expected 1 IP, got %d", filtered.Len())
+	}
+}
+
+func TestFilterByAirports_preserves_entry_data(t *testing.T) {
+	// Given: an IPMap with an IP that has multiple ports and airports.
+	m := NewIPMap()
+	m.add(netip.MustParseAddr("1.2.3.4"), 443, "DFW")
+	m.add(netip.MustParseAddr("1.2.3.4"), 8443, "NRT")
+
+	// When: filter by DFW.
+	filtered := m.FilterByAirports([]string{"DFW"})
+
+	// Then: port data is preserved.
+	if filtered.Len() != 1 {
+		t.Fatalf("expected 1 IP, got %d", filtered.Len())
+	}
+	addr := netip.MustParseAddr("1.2.3.4")
+	ports := filtered.GetPorts(addr)
+	if len(ports) != 2 {
+		t.Errorf("expected 2 ports, got %v", ports)
+	}
+	// BestPort should still be 443.
+	entry := filtered.entries[addr]
+	if entry.BestPort != 443 {
+		t.Errorf("BestPort = %d, want 443", entry.BestPort)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestMerge
+// ---------------------------------------------------------------------------
+
+func TestMerge_combines_two_maps(t *testing.T) {
+	// Given: two IPMaps with disjoint IPs.
+	a := NewIPMap()
+	a.add(netip.MustParseAddr("1.2.3.4"), 443, "US")
+
+	b := NewIPMap()
+	b.add(netip.MustParseAddr("5.6.7.8"), 443, "JP")
+
+	// When: merge b into a.
+	a.Merge(b)
+
+	// Then: a has 2 entries.
+	if a.Len() != 2 {
+		t.Fatalf("expected 2 IPs after merge, got %d", a.Len())
+	}
+}
+
+func TestMerge_deduplicates_overlapping_IPs(t *testing.T) {
+	// Given: two IPMaps with overlapping IP but different ports.
+	a := NewIPMap()
+	a.add(netip.MustParseAddr("1.2.3.4"), 443, "US")
+
+	b := NewIPMap()
+	b.add(netip.MustParseAddr("1.2.3.4"), 8443, "US")
+
+	// When: merge b into a.
+	a.Merge(b)
+
+	// Then: still 1 entry with both ports.
+	if a.Len() != 1 {
+		t.Fatalf("expected 1 IP after merge, got %d", a.Len())
+	}
+	ports := a.GetPorts(netip.MustParseAddr("1.2.3.4"))
+	if len(ports) != 2 || ports[0] != 443 || ports[1] != 8443 {
+		t.Errorf("ports = %v, want [443 8443]", ports)
+	}
+}
+
+func TestMerge_empty_other(t *testing.T) {
+	// Given: a map with one entry and an empty map.
+	a := NewIPMap()
+	a.add(netip.MustParseAddr("1.2.3.4"), 443, "US")
+	b := NewIPMap()
+
+	// When: merge empty.
+	a.Merge(b)
+
+	// Then: unchanged.
+	if a.Len() != 1 {
+		t.Errorf("expected 1 IP, got %d", a.Len())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestParseFiles
+// ---------------------------------------------------------------------------
+
+func TestParseFiles_combines_multiple_files(t *testing.T) {
+	// Given: two temp files with different IPs.
+	dir := t.TempDir()
+
+	f1 := filepath.Join(dir, "file1.txt")
+	if err := os.WriteFile(f1, []byte("1.2.3.4:443#US\n5.6.7.8:443#JP\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	f2 := filepath.Join(dir, "file2.txt")
+	if err := os.WriteFile(f2, []byte("9.10.11.12:8443#HK\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// When: parse both files.
+	m, err := ParseFiles(f1, f2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Then: all 3 IPs are present.
+	if m.Len() != 3 {
+		t.Errorf("expected 3 IPs, got %d", m.Len())
+	}
+}
+
+func TestParseFiles_deduplicates_across_files(t *testing.T) {
+	// Given: two files with overlapping IPs.
+	dir := t.TempDir()
+
+	f1 := filepath.Join(dir, "file1.txt")
+	if err := os.WriteFile(f1, []byte("1.2.3.4:443#US\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	f2 := filepath.Join(dir, "file2.txt")
+	if err := os.WriteFile(f2, []byte("1.2.3.4:8443#US\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// When: parse both files.
+	m, err := ParseFiles(f1, f2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Then: 1 entry with both ports.
+	if m.Len() != 1 {
+		t.Fatalf("expected 1 IP, got %d", m.Len())
+	}
+	ports := m.GetPorts(netip.MustParseAddr("1.2.3.4"))
+	if len(ports) != 2 {
+		t.Errorf("expected 2 ports, got %v", ports)
+	}
+}
+
+func TestParseFiles_single_file(t *testing.T) {
+	// Given: single file (backward compatibility).
+	dir := t.TempDir()
+	f := filepath.Join(dir, "single.txt")
+	if err := os.WriteFile(f, []byte("1.2.3.4:443#US\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// When: parse single file via ParseFiles.
+	m, err := ParseFiles(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Then: 1 entry.
+	if m.Len() != 1 {
+		t.Errorf("expected 1 IP, got %d", m.Len())
+	}
+}
+
+func TestParseFiles_nonexistent_file_returns_error(t *testing.T) {
+	// When: parse a nonexistent file (among valid ones).
+	_, err := ParseFiles("/nonexistent/file.txt")
+	if err == nil {
+		t.Error("expected error for nonexistent file")
+	}
+}
+
+func TestParseFiles_empty_file_list(t *testing.T) {
+	// When: no files.
+	m, err := ParseFiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Then: empty map.
+	if m.Len() != 0 {
+		t.Errorf("expected 0 IPs, got %d", m.Len())
 	}
 }
 
