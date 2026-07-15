@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"net/netip"
 	"os"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -61,7 +61,7 @@ func ParseHopLine(line string) *Hop {
 	}
 
 	// First field is TTL.
-	ttl, err := parseInt(fields[0])
+	ttl, err := strconv.Atoi(fields[0])
 	if err != nil {
 		return nil
 	}
@@ -116,18 +116,6 @@ func stripUnreachable(ipField string) (string, bool) {
 		}
 	}
 	return ipField, false
-}
-
-// parseInt parses an integer from a string. Returns 0 and an error on failure.
-func parseInt(s string) (int, error) {
-	var n int
-	for _, c := range s {
-		if c < '0' || c > '9' {
-			return 0, fmt.Errorf("not a number: %s", s)
-		}
-		n = n*10 + int(c-'0')
-	}
-	return n, nil
 }
 
 // hasUnreachableSuffix checks if s ends with any ICMP unreachable marker.
@@ -198,6 +186,7 @@ func findOrder(ip net.IP, ips []net.IP) int {
 // process can be resumed after interruption.
 type CheckpointManager struct {
 	checkpointPath string
+	dedupMode      string
 	mu             sync.Mutex
 }
 
@@ -217,6 +206,7 @@ func NewCheckpointManager(dedupMode string) *CheckpointManager {
 	}
 	return &CheckpointManager{
 		checkpointPath: "/tmp/.cmin2-trace-checkpoint.json",
+		dedupMode:      dedupMode,
 	}
 }
 
@@ -262,6 +252,9 @@ func (cm *CheckpointManager) Save(data *CheckpointData) error {
 		data.CompletedIPs = append(data.CompletedIPs, ip)
 	}
 	sort.Strings(data.CompletedIPs)
+
+	// Record the active dedup mode so the checkpoint can be validated on resume.
+	data.DedupMode = cm.dedupMode
 
 	tmpPath := cm.checkpointPath + ".tmp"
 	f, err := os.Create(tmpPath)
@@ -524,49 +517,193 @@ func (tr *TracerouteRunner) runSingle(ctx context.Context, ip net.IP) *TraceResu
 	return result
 }
 
-// ipToNetIP converts a netip.Addr to net.IP.
-func ipToNetIP(addr netip.Addr) net.IP {
-	return net.IP(addr.AsSlice())
+// ────────────────────── Route type system ──────────────────────
+
+// RouteType represents a premium routing network type.
+type RouteType string
+
+const (
+	// RouteCMIN2 identifies China Mobile's premium CMIN2 network (AS58807).
+	RouteCMIN2 RouteType = "cmin2"
+	// RouteCN2GIA identifies China Telecom's CN2 GIA premium network (AS4809).
+	RouteCN2GIA RouteType = "cn2gia"
+)
+
+// RoutePrefixes defines the CIDR ranges for each premium routing network.
+//
+// CMIN2 (AS58807):
+//   Primary range:   223.120.0.0/16  (core backbone)
+//   Secondary range: 223.119.0.0/16  (extended range)
+//   Using /16 as a safe over-estimate to avoid false negatives.
+//   Verified: 23.249.17.25 shows 223.120.141.50 at hop 9 and
+//   223.120.130.34 at hop 10.
+//
+// CN2 GIA (AS4809/CN2-BB):
+//   59.43.0.0/16  (CN2 backbone, confirmed via whois)
+var RoutePrefixes = map[RouteType][]net.IPNet{
+	RouteCMIN2: {
+		{IP: net.IPv4(223, 120, 0, 0), Mask: net.CIDRMask(16, 32)},
+		{IP: net.IPv4(223, 119, 0, 0), Mask: net.CIDRMask(16, 32)},
+	},
+	RouteCN2GIA: {
+		{IP: net.IPv4(59, 43, 0, 0), Mask: net.CIDRMask(16, 32)},
+	},
 }
 
-// netIPsFromAddrs converts a slice of netip.Addr to a slice of net.IP.
-func netIPsFromAddrs(addrs []netip.Addr) []net.IP {
-	ips := make([]net.IP, len(addrs))
-	for i, a := range addrs {
-		ips[i] = ipToNetIP(a)
+// isRoutedIP checks if an IP falls within any of the given CIDR prefixes.
+func isRoutedIP(ip net.IP, prefixes []net.IPNet) bool {
+	for _, prefix := range prefixes {
+		if prefix.Contains(ip) {
+			return true
+		}
 	}
-	return ips
+	return false
 }
 
-// ────────────────────── CMIN2 detection ──────────────────────
+// RouteResult holds the classification result for a single target IP.
+type RouteResult struct {
+	TargetIP  net.IP
+	RouteType RouteType
+	IsRouted  bool
+	Confidence float64 // 0.95 for 2+ matching hops, 0.70 for 1 hop, 0.05 for 0 hops
+	RouteHops []Hop    // Hops that matched the route type's prefixes
+	AllHops   []Hop    // All hops from the traceroute
+}
 
-// CMIN2Prefixes defines the CIDR ranges for China Mobile's premium
-// CMIN2 network (AS58807).
+// IsRouted returns true if any hop in the trace result has an IP address
+// within the prefixes for the given route type.
+func (tr *TraceResult) IsRouted(rt RouteType) bool {
+	prefixes, ok := RoutePrefixes[rt]
+	if !ok {
+		return false
+	}
+	for _, hop := range tr.Hops {
+		if hop.IP != nil && isRoutedIP(hop.IP, prefixes) {
+			return true
+		}
+	}
+	return false
+}
+
+// CountRouteHops returns the number of hops whose IP falls within any
+// prefix for the given route type.
+func CountRouteHops(hops []Hop, rt RouteType) int {
+	prefixes, ok := RoutePrefixes[rt]
+	if !ok {
+		return 0
+	}
+	count := 0
+	for _, hop := range hops {
+		if hop.IP != nil && isRoutedIP(hop.IP, prefixes) {
+			count++
+		}
+	}
+	return count
+}
+
+// ────────────────────── Generalized classification ──────────────────────
+// These functions work for any RouteType, not just CMIN2.
+// Old CMIN2-specific functions below are deprecated wrappers.
+
+// ClassifyRouteResult classifies a single TraceResult for the given route type
+// and returns a RouteResult with confidence scoring.
 //
-// Primary range:   223.120.0.0/16  (core backbone)
-// Secondary range: 223.119.0.0/16  (extended range)
+// Confidence formula:
+//   - 2+ matching hops → 0.95 (high confidence)
+//   - 1 matching hop   → 0.70 (medium confidence)
+//   - 0 matching hops  → 0.05 (not routed)
+func ClassifyRouteResult(tr *TraceResult, rt RouteType) *RouteResult {
+	result := &RouteResult{
+		TargetIP:  tr.TargetIP,
+		RouteType: rt,
+		AllHops:   tr.Hops,
+	}
+
+	prefixes := RoutePrefixes[rt]
+	for _, hop := range tr.Hops {
+		if hop.IP != nil && isRoutedIP(hop.IP, prefixes) {
+			result.RouteHops = append(result.RouteHops, hop)
+		}
+	}
+
+	// Sort RouteHops by TTL for deterministic output.
+	sort.Slice(result.RouteHops, func(i, j int) bool {
+		return result.RouteHops[i].TTL < result.RouteHops[j].TTL
+	})
+
+	if len(result.RouteHops) > 0 {
+		result.IsRouted = true
+		if len(result.RouteHops) >= 2 {
+			result.Confidence = 0.95
+		} else {
+			result.Confidence = 0.70
+		}
+	} else {
+		result.IsRouted = false
+		result.Confidence = 0.05
+	}
+
+	return result
+}
+
+// ClassifyAllRoutes classifies all trace results for each enabled route type
+// and returns a flattened list of all positive matches (IsRouted == true).
 //
-// Using /16 as a safe over-estimate to avoid false negatives.
-// Verified: 23.249.17.25 shows 223.120.141.50 at hop 9 and
-// 223.120.130.34 at hop 10.
-var CMIN2Prefixes = []net.IPNet{
-	{IP: net.IPv4(223, 120, 0, 0), Mask: net.CIDRMask(16, 32)},
-	{IP: net.IPv4(223, 119, 0, 0), Mask: net.CIDRMask(16, 32)},
+// The result is sorted by (TargetIP, RouteType) for deterministic output.
+// A single IP can appear multiple times, once per matching route type.
+func ClassifyAllRoutes(results map[string]*TraceResult, enabledTypes []RouteType) []*RouteResult {
+	var allResults []*RouteResult
+	for _, tr := range results {
+		for _, rt := range enabledTypes {
+			r := ClassifyRouteResult(tr, rt)
+			if r.IsRouted {
+				allResults = append(allResults, r)
+			}
+		}
+	}
+
+	// Sort by (TargetIP string, RouteType) for deterministic output.
+	sort.Slice(allResults, func(i, j int) bool {
+		if allResults[i].TargetIP == nil || allResults[j].TargetIP == nil {
+			return false
+		}
+		ipI := allResults[i].TargetIP.String()
+		ipJ := allResults[j].TargetIP.String()
+		if ipI == ipJ {
+			return allResults[i].RouteType < allResults[j].RouteType
+		}
+		return ipI < ipJ
+	})
+
+	return allResults
+}
+
+// ────────────────────── CMIN2 wrappers (deprecated) ──────────────────────
+// These keep the old CMIN2 symbols working while delegating to the
+// generalized route type system above.
+
+// CMIN2Prefixes defines the CIDR ranges for China Mobile's premium CMIN2
+// network (AS58807). Deprecated: use RoutePrefixes[RouteCMIN2].
+var CMIN2Prefixes = RoutePrefixes[RouteCMIN2]
+
+// isCMIN2IP checks if an IP falls within any CMIN2 CIDR prefix.
+// Deprecated: use isRoutedIP(ip, RoutePrefixes[RouteCMIN2]).
+func isCMIN2IP(ip net.IP) bool {
+	return isRoutedIP(ip, RoutePrefixes[RouteCMIN2])
 }
 
 // IsCMIN2 returns true if any hop in the trace result has an IP address
 // within the CMIN2 CIDR ranges.
+// Deprecated: use TraceResult.IsRouted(RouteCMIN2).
 func (tr *TraceResult) IsCMIN2() bool {
-	for _, hop := range tr.Hops {
-		if hop.IP != nil {
-			for _, prefix := range CMIN2Prefixes {
-				if prefix.Contains(hop.IP) {
-					return true
-				}
-			}
-		}
-	}
-	return false
+	return tr.IsRouted(RouteCMIN2)
+}
+
+// CountCMIN2Hops returns the number of hops whose IP falls within any
+// CMIN2 prefix range.
+// Deprecated: use CountRouteHops(hops, RouteCMIN2).
+func CountCMIN2Hops(hops []Hop) int {
+	return CountRouteHops(hops, RouteCMIN2)
 }
 
 // CMIN2Result holds the classification result for a single target IP.
@@ -578,74 +715,36 @@ type CMIN2Result struct {
 	AllHops    []Hop     // All hops from the traceroute
 }
 
-// CountCMIN2Hops returns the number of hops whose IP falls within any
-// CMIN2 prefix range.
-func CountCMIN2Hops(hops []Hop) int {
-	count := 0
-	for _, hop := range hops {
-		if hop.IP != nil {
-			for _, prefix := range CMIN2Prefixes {
-				if prefix.Contains(hop.IP) {
-					count++
-					break
-				}
-			}
-		}
-	}
-	return count
-}
-
 // ClassifyTraceResult classifies a single TraceResult for CMIN2 routing.
+//
+// Deprecated: use ClassifyRouteResult(tr, RouteCMIN2).
 func ClassifyTraceResult(tr *TraceResult) *CMIN2Result {
-	result := &CMIN2Result{
-		TargetIP: tr.TargetIP,
-		AllHops:  tr.Hops,
+	r := ClassifyRouteResult(tr, RouteCMIN2)
+	return &CMIN2Result{
+		TargetIP:   r.TargetIP,
+		IsCMIN2:    r.IsRouted,
+		Confidence: r.Confidence,
+		CMIN2Hops:  r.RouteHops,
+		AllHops:    r.AllHops,
 	}
-
-	// Collect CMIN2 hops.
-	for _, hop := range tr.Hops {
-		if hop.IP != nil {
-			for _, prefix := range CMIN2Prefixes {
-				if prefix.Contains(hop.IP) {
-					result.CMIN2Hops = append(result.CMIN2Hops, hop)
-					break
-				}
-			}
-		}
-	}
-
-	if len(result.CMIN2Hops) > 0 {
-		result.IsCMIN2 = true
-		if len(result.CMIN2Hops) >= 2 {
-			result.Confidence = 0.95
-		} else {
-			result.Confidence = 0.70
-		}
-	} else {
-		result.IsCMIN2 = false
-		result.Confidence = 0.05
-	}
-
-	return result
 }
 
 // ClassifyAllResults classifies all trace results for CMIN2 routing and
 // returns only the CMIN2-positive results.
+//
+// Deprecated: use ClassifyAllRoutes(results, []RouteType{RouteCMIN2}).
 func ClassifyAllResults(results map[string]*TraceResult) []*CMIN2Result {
-	var cmin2Results []*CMIN2Result
-	for _, tr := range results {
-		cr := ClassifyTraceResult(tr)
-		if cr.IsCMIN2 {
-			cmin2Results = append(cmin2Results, cr)
-		}
+	routeResults := ClassifyAllRoutes(results, []RouteType{RouteCMIN2})
+	cmin2Results := make([]*CMIN2Result, 0, len(routeResults))
+	for _, r := range routeResults {
+		cmin2Results = append(cmin2Results, &CMIN2Result{
+			TargetIP:   r.TargetIP,
+			IsCMIN2:    r.IsRouted,
+			Confidence: r.Confidence,
+			CMIN2Hops:  r.RouteHops,
+			AllHops:    r.AllHops,
+		})
 	}
-	// Sort by TargetIP for deterministic output.
-	sort.Slice(cmin2Results, func(i, j int) bool {
-		if cmin2Results[i].TargetIP == nil || cmin2Results[j].TargetIP == nil {
-			return false
-		}
-		return cmin2Results[i].TargetIP.String() < cmin2Results[j].TargetIP.String()
-	})
 	return cmin2Results
 }
 

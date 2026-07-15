@@ -1,7 +1,6 @@
 package main
 
 import (
-	"log"
 	"net/netip"
 	"sort"
 	"testing"
@@ -307,7 +306,7 @@ func TestGetPortsForIP(t *testing.T) {
 	m.add(ip, 8443, "US")
 
 	// When
-	ports := GetPortsForIP(ip, m)
+	ports := m.GetPorts(ip)
 
 	// Then
 	if len(ports) != 2 {
@@ -327,7 +326,7 @@ func TestGetPortsForIP_Unknown(t *testing.T) {
 	ip := netip.MustParseAddr("1.2.3.4")
 
 	// When
-	ports := GetPortsForIP(ip, m)
+	ports := m.GetPorts(ip)
 
 	// Then
 	if ports != nil {
@@ -355,12 +354,4 @@ func TestItoa(t *testing.T) {
 			t.Errorf("itoa(%d) = %q, want %q", tt.input, got, tt.want)
 		}
 	}
-}
-
-// ────────────────────── init ──────────────────────
-
-func init() {
-	// Suppress log output during tests to keep output clean.
-	log.SetFlags(0)
-	log.SetOutput(testLogWriter{})
 }

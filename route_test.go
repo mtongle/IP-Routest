@@ -251,15 +251,14 @@ func TestCheckpointClear(t *testing.T) {
 }
 
 func TestCheckpointDifferentModes(t *testing.T) {
+	// Given: a checkpoint saved with dedup_mode "/24" via the production path.
 	cm := NewCheckpointManager("/24")
 	savedPath := cm.checkpointPath
 	cm.checkpointPath = t.TempDir() + "/checkpoint-modes.json"
 	defer func() { cm.checkpointPath = savedPath }()
 
-	// Given: a checkpoint saved with dedup_mode "/24".
 	cp := &CheckpointData{
 		CompletedSet: make(map[string]bool),
-		DedupMode:    "/24",
 		StartTime:    time.Now(),
 	}
 	cm.MarkCompleted(cp, "1.2.3.4")
@@ -272,6 +271,7 @@ func TestCheckpointDifferentModes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load failed: %v", err)
 	}
+	// Then: DedupMode was set by Save() from the CheckpointManager.
 	if loaded.DedupMode != "/24" {
 		t.Errorf("DedupMode = %q, want \"/24\"", loaded.DedupMode)
 	}
@@ -411,14 +411,6 @@ func Test_ipsSame24(t *testing.T) {
 			}
 		})
 	}
-}
-
-func Test_netIPsFromAddrs(t *testing.T) {
-	// Verify the conversion helper works. This test is lightweight since
-	// the function is trivial.
-	p := net.ParseIP("1.2.3.4")
-	_ = p
-	// The function is tested implicitly by the module integration tests.
 }
 
 // ────────────────────── NewTracerouteRunner defaults ──────────────────────

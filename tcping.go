@@ -83,12 +83,6 @@ func TCPingPort(ip netip.Addr, port int, rounds int, timeout time.Duration) *Por
 	return pr
 }
 
-// GetPortsForIP returns the ports for an IP from the IPMap.
-// This is a thin wrapper around IPMap.GetPorts.
-func GetPortsForIP(ip netip.Addr, ipMap *IPMap) []int {
-	return ipMap.GetPorts(ip)
-}
-
 // selectBestPort selects the best port result from a map of per-port results.
 // Selection priority:
 //  1. Port with lowest AvgRTT
