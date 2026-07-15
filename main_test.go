@@ -312,6 +312,55 @@ func TestWriteRouteAnalysis(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// TestWriteRouteAnalysis_CN2GIA — verify CN2GIA route analysis output
+// ---------------------------------------------------------------------------
+
+func TestWriteRouteAnalysis_CN2GIA(t *testing.T) {
+	// Given: a CN2GIA-routed result with a 59.43.x.x hop.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "04-cn2gia-route-analysis.txt")
+
+	results := []*RouteResult{
+		{
+			TargetIP:  net.ParseIP("10.0.0.1"),
+			RouteType: RouteCN2GIA,
+			RouteHops: []Hop{
+				{TTL: 5, IP: net.ParseIP("59.43.1.1"), RTT: 39*time.Millisecond + 160*time.Microsecond},
+			},
+			AllHops: []Hop{
+				{TTL: 1, IP: net.ParseIP("192.168.1.1"), RTT: 1*time.Millisecond + 234*time.Microsecond},
+				{TTL: 5, IP: net.ParseIP("59.43.1.1"), RTT: 39*time.Millisecond + 160*time.Microsecond},
+			},
+		},
+	}
+
+	// When: write the file.
+	if err := WriteRouteAnalysis(results, RouteCN2GIA, path); err != nil {
+		t.Fatal(err)
+	}
+
+	// Then: read back and verify.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+
+	if !strings.Contains(content, "cn2gia-routed IPs") {
+		t.Error("missing cn2gia-routed IPs header")
+	}
+	if !strings.Contains(content, "59.43.1.1") {
+		t.Error("missing hop IP 59.43.1.1")
+	}
+	if !strings.Contains(content, "[CN2GIA]") {
+		t.Error("missing [CN2GIA] marker")
+	}
+	if !strings.Contains(content, "39.160") {
+		t.Error("missing RTT 39.160ms")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // TestSafeWriterAtomicity — verify .tmp → final rename semantics
 // ---------------------------------------------------------------------------
 

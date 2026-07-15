@@ -686,3 +686,154 @@ func TestCMIN2Prefixes_Contains(t *testing.T) {
 		})
 	}
 }
+
+// ────────────────────── CN2GIA detection tests ──────────────────────
+
+func TestIsCN2GIA_Positive(t *testing.T) {
+	// Given: a trace result with a 59.43.x.x hop (CN2GIA range).
+	tr := &TraceResult{
+		TargetIP: net.ParseIP("1.2.3.4"),
+		Hops: []Hop{
+			{TTL: 1, IP: net.ParseIP("192.168.1.1")},
+			{TTL: 5, IP: net.ParseIP("59.43.1.1")},
+		},
+	}
+
+	// When
+	got := tr.IsRouted(RouteCN2GIA)
+
+	// Then
+	if !got {
+		t.Error("IsRouted(RouteCN2GIA) = false, want true (hop 59.43.1.1 is in CN2GIA range)")
+	}
+}
+
+func TestIsCN2GIA_Negative(t *testing.T) {
+	// Given: a trace result without any 59.43.x.x hops.
+	tr := &TraceResult{
+		TargetIP: net.ParseIP("1.1.1.1"),
+		Hops: []Hop{
+			{TTL: 1, IP: net.ParseIP("192.168.1.1")},
+			{TTL: 2, IP: net.ParseIP("1.1.1.1")},
+		},
+	}
+
+	// When
+	got := tr.IsRouted(RouteCN2GIA)
+
+	// Then
+	if got {
+		t.Error("IsRouted(RouteCN2GIA) = true, want false (no 59.43.x.x hops)")
+	}
+}
+
+func TestCountCN2GIAHops(t *testing.T) {
+	// Given: hops with 2 CN2GIA (59.43.x.x) and 3 non-CN2GIA IPs.
+	hops := []Hop{
+		{TTL: 1, IP: net.ParseIP("192.168.1.1")},
+		{TTL: 2, IP: net.ParseIP("59.43.1.1")},
+		{TTL: 3, IP: net.ParseIP("10.0.0.1")},
+		{TTL: 4, IP: net.ParseIP("59.43.2.2")},
+		{TTL: 5, IP: net.ParseIP("8.8.8.8")},
+	}
+
+	// When
+	count := CountRouteHops(hops, RouteCN2GIA)
+
+	// Then
+	if count != 2 {
+		t.Errorf("CountRouteHops(RouteCN2GIA) = %d, want 2", count)
+	}
+}
+
+func TestClassifyRouteResult_CN2GIA_HighConfidence(t *testing.T) {
+	// Given: a trace result with 2 CN2GIA hops.
+	tr := &TraceResult{
+		TargetIP: net.ParseIP("10.0.0.1"),
+		Hops: []Hop{
+			{TTL: 9, IP: net.ParseIP("59.43.1.1")},
+			{TTL: 10, IP: net.ParseIP("59.43.2.2")},
+		},
+	}
+
+	// When
+	result := ClassifyRouteResult(tr, RouteCN2GIA)
+
+	// Then
+	if !result.IsRouted {
+		t.Error("IsRouted = false, want true")
+	}
+	if result.RouteType != RouteCN2GIA {
+		t.Errorf("RouteType = %v, want cn2gia", result.RouteType)
+	}
+	if result.Confidence != 0.95 {
+		t.Errorf("Confidence = %v, want 0.95", result.Confidence)
+	}
+	if len(result.RouteHops) != 2 {
+		t.Errorf("RouteHops count = %d, want 2", len(result.RouteHops))
+	}
+	if !result.TargetIP.Equal(net.ParseIP("10.0.0.1")) {
+		t.Errorf("TargetIP = %v, want 10.0.0.1", result.TargetIP)
+	}
+	if len(result.AllHops) != 2 {
+		t.Errorf("AllHops count = %d, want 2", len(result.AllHops))
+	}
+}
+
+func TestClassifyRouteResult_CN2GIA_LowConfidence(t *testing.T) {
+	// Given: a trace result with 1 CN2GIA hop.
+	tr := &TraceResult{
+		TargetIP: net.ParseIP("10.0.0.1"),
+		Hops: []Hop{
+			{TTL: 1, IP: net.ParseIP("192.168.1.1")},
+			{TTL: 5, IP: net.ParseIP("59.43.1.1")},
+		},
+	}
+
+	// When
+	result := ClassifyRouteResult(tr, RouteCN2GIA)
+
+	// Then
+	if !result.IsRouted {
+		t.Error("IsRouted = false, want true")
+	}
+	if result.Confidence != 0.70 {
+		t.Errorf("Confidence = %v, want 0.70", result.Confidence)
+	}
+	if len(result.RouteHops) != 1 {
+		t.Errorf("RouteHops count = %d, want 1", len(result.RouteHops))
+	}
+}
+
+func TestRoutePrefixes_CN2GIA_Contains(t *testing.T) {
+	// Given: the CN2GIA prefix table (59.43.0.0/16).
+	prefixes := RoutePrefixes[RouteCN2GIA]
+
+	tests := []struct {
+		name string
+		ip   string
+		want bool
+	}{
+		{"in range", "59.43.1.1", true},
+		{"in range boundary low", "59.43.0.0", true},
+		{"in range boundary high", "59.43.255.255", true},
+		{"not in range", "1.1.1.1", false},
+		{"adjacent not in range", "59.44.0.1", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ip := net.ParseIP(tt.ip)
+			matched := false
+			for _, p := range prefixes {
+				if p.Contains(ip) {
+					matched = true
+					break
+				}
+			}
+			if matched != tt.want {
+				t.Errorf("Contains(%s) = %v, want %v", tt.ip, matched, tt.want)
+			}
+		})
+	}
+}
