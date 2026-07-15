@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -75,9 +76,9 @@ func (sw *SafeWriter) Close() error {
 // Output formatters
 // ---------------------------------------------------------------------------
 
-// WriteCMIN2List writes File 01: CMIN2-routed IPs sorted by IP, with country
-// lookup from ipMap.
-func WriteCMIN2List(results []*CMIN2Result, ipMap *IPMap, path string) error {
+// WriteRouteList writes File 01: Route-routed IPs sorted by IP, with route hop
+// count and confidence for the given route type.
+func WriteRouteList(results []*RouteResult, routeType RouteType, ipMap *IPMap, path string) error {
 	sw, err := NewSafeWriter(path)
 	if err != nil {
 		return err
@@ -87,19 +88,19 @@ func WriteCMIN2List(results []*CMIN2Result, ipMap *IPMap, path string) error {
 	timestamp := time.Now().Format("2006-01-02 15:04:05")
 
 	// Sort by IP ascending.
-	sorted := make([]*CMIN2Result, len(results))
+	sorted := make([]*RouteResult, len(results))
 	copy(sorted, results)
 	sort.Slice(sorted, func(i, j int) bool {
 		return sorted[i].TargetIP.String() < sorted[j].TargetIP.String()
 	})
 
-	sw.WriteString(fmt.Sprintf("# CMIN2-routed IPs - %s\n", timestamp))
-	sw.WriteString("# Format: IP Airport CMIN2HopCount Confidence\n")
+	sw.WriteString(fmt.Sprintf("# %s-routed IPs - %s\n", routeType, timestamp))
+	sw.WriteString("# Format: IP Airport RouteHopCount Confidence\n")
 	sw.WriteString(fmt.Sprintf("# Total: %d\n", len(sorted)))
 
 	for _, r := range sorted {
 		airport := getAirport(r.TargetIP, ipMap)
-		hopCount := CountCMIN2Hops(r.AllHops)
+		hopCount := CountRouteHops(r.AllHops, routeType)
 		sw.WriteString(fmt.Sprintf("%s %s %d %.2f\n", r.TargetIP, airport, hopCount, r.Confidence))
 	}
 
@@ -159,8 +160,8 @@ func WriteSpeedSorted(results []*SpeedResult, rttLookup map[netip.Addr]time.Dura
 }
 
 // WriteRouteAnalysis writes File 04: Detailed route analysis for each
-// CMIN2-routed IP, showing every hop with CMIN2 markers.
-func WriteRouteAnalysis(results []*CMIN2Result, path string) error {
+// route-routed IP, showing every hop with route type markers.
+func WriteRouteAnalysis(results []*RouteResult, routeType RouteType, path string) error {
 	sw, err := NewSafeWriter(path)
 	if err != nil {
 		return err
@@ -168,9 +169,12 @@ func WriteRouteAnalysis(results []*CMIN2Result, path string) error {
 	defer sw.Close()
 
 	timestamp := time.Now().Format("2006-01-02 15:04:05")
+	routedLabel := strings.ToUpper(string(routeType))
 
-	sw.WriteString(fmt.Sprintf("# Route analysis for CMIN2-routed IPs - %s\n", timestamp))
-	sw.WriteString("# Format: IP then each hop as Hop TTL IP RTT(ms) [CMIN2]\n")
+	sw.WriteString(fmt.Sprintf("# Route analysis for %s-routed IPs - %s\n", routeType, timestamp))
+	sw.WriteString(fmt.Sprintf("# Format: IP then each hop as Hop TTL IP RTT(ms) [%s]\n", routedLabel))
+
+	prefixes := RoutePrefixes[routeType]
 
 	for _, r := range results {
 		sw.WriteString(fmt.Sprintf("%s:\n", r.TargetIP))
@@ -183,8 +187,8 @@ func WriteRouteAnalysis(results []*CMIN2Result, path string) error {
 			}
 
 			marker := ""
-			if hop.IP != nil && isCMIN2IP(hop.IP) {
-				marker = " [CMIN2]"
+			if hop.IP != nil && isRoutedIP(hop.IP, prefixes) {
+				marker = fmt.Sprintf(" [%s]", routedLabel)
 			}
 
 			sw.WriteString(fmt.Sprintf(" Hop %d %s %.3f%s\n", hop.TTL, ipStr, rttMs, marker))
