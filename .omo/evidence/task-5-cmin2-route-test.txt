@@ -1,0 +1,26 @@
+TASK 5 EVIDENCE: speed.go — HTTP download speed test via custom dialer
+=======================================================================
+Date: 2026-07-15
+Status: PASS
+
+FILES CREATED:
+- speed.go (167 lines)
+- speed_test.go (199 lines, 5 tests)
+
+VERIFICATION:
+- go vet ./...: clean
+- go build ./...: success
+- go test -count=1 ./...: ALL PASS (16.583s including real speed test)
+
+FUNCTIONALITY VERIFIED:
+- Custom dialer: connects to IP:PORT directly, bypasses DNS ✓
+- TLS: ServerName="speed.cloudflare.com", NO InsecureSkipVerify ✓
+- URL: https://speed.cloudflare.com/__down?bytes=99999999 ✓
+- 30s timeout via http.Client.Timeout only (no double-wrap) ✓
+- Partial timeout: bytesRead > 0 → SpeedMbps > 0 ✓
+- DisableKeepAlives: true ✓
+- Known-good IP (23.249.17.25:443) → SpeedMbps > 0 ✓
+- Invalid IP (1.1.1.1:443) → TLS fail, SpeedMbps=0 ✓
+- Mbps calculation: 100MB/10s→80Mbps ✓
+- RunSpeedTest: topN=1 from 2 IPs → 1 result ✓
+- No external deps, no existing file modifications ✓
