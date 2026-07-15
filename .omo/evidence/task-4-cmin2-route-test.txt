@@ -1,0 +1,21 @@
+TASK 4 EVIDENCE: tcping.go — TCP handshake latency measurement
+===============================================================
+Date: 2026-07-15
+Status: PASS
+
+FILES CREATED:
+- tcping.go (280 lines)
+- tcping_test.go (366 lines, 14 tests)
+
+VERIFICATION:
+- go vet ./...: clean
+- go build ./...: success
+- go test -count=1 ./...: 77/77 PASS (1.650s including real TCP connects)
+
+FUNCTIONALITY VERIFIED:
+- TCPingSingle: open port (23.249.17.25:443) → valid RTT, closed port (9999) → error ✓
+- TCPingPort: 4 rounds, 0-500ms jitter per dial, AvgRTT calculated ✓
+- PortRTT: 3/4 success → LossRate=0.25 ✓
+- selectBestPort: lowest AvgRTT preferred, tie → 443, all failed → lowest loss ✓
+- RunTCPing: IP dedup, port mapping, per-IP best-port, worker pool (200) ✓
+- No external deps, no existing file modifications ✓
