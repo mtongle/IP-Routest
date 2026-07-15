@@ -459,3 +459,235 @@ func TestCheckpointFileNotFound(t *testing.T) {
 	// Clean up.
 	os.Remove(cm.checkpointPath)
 }
+
+// ────────────────────── CMIN2 detection tests ──────────────────────
+
+func TestIsCMIN2_Positive(t *testing.T) {
+	// Given: a trace result with a CMIN2 hop.
+	tr := &TraceResult{
+		TargetIP: net.ParseIP("23.249.17.25"),
+		Hops: []Hop{
+			{TTL: 1, IP: net.ParseIP("192.168.1.1")},
+			{TTL: 9, IP: net.ParseIP("223.120.141.50")},
+		},
+	}
+
+	// When
+	got := tr.IsCMIN2()
+
+	// Then
+	if !got {
+		t.Error("IsCMIN2() = false, want true (hop 223.120.141.50 is in CMIN2 range)")
+	}
+}
+
+func TestIsCMIN2_Negative(t *testing.T) {
+	// Given: a trace result with only non-CMIN2 hops.
+	tr := &TraceResult{
+		TargetIP: net.ParseIP("1.1.1.1"),
+		Hops: []Hop{
+			{TTL: 1, IP: net.ParseIP("192.168.1.1")},
+			{TTL: 2, IP: net.ParseIP("1.1.1.1")},
+		},
+	}
+
+	// When
+	got := tr.IsCMIN2()
+
+	// Then
+	if got {
+		t.Error("IsCMIN2() = true, want false (1.1.1.1 is not in CMIN2 range)")
+	}
+}
+
+func TestIsCMIN2_SecondaryRange(t *testing.T) {
+	// Given: a trace result with a hop in the secondary CMIN2 range.
+	tr := &TraceResult{
+		TargetIP: net.ParseIP("10.0.0.1"),
+		Hops: []Hop{
+			{TTL: 1, IP: net.ParseIP("223.119.1.1")},
+		},
+	}
+
+	// When
+	got := tr.IsCMIN2()
+
+	// Then
+	if !got {
+		t.Error("IsCMIN2() = false, want true (223.119.1.1 is in secondary CMIN2 range)")
+	}
+}
+
+func TestIsCMIN2_NotMatched(t *testing.T) {
+	// Given: a trace result with a hop in a nearby but non-CMIN2 range.
+	tr := &TraceResult{
+		TargetIP: net.ParseIP("10.0.0.1"),
+		Hops: []Hop{
+			{TTL: 1, IP: net.ParseIP("223.118.1.1")},
+		},
+	}
+
+	// When
+	got := tr.IsCMIN2()
+
+	// Then
+	if got {
+		t.Error("IsCMIN2() = true, want false (223.118.1.1 is regular CMI, not CMIN2)")
+	}
+}
+
+func TestCountCMIN2Hops(t *testing.T) {
+	// Given: hops with 2 CMIN2 and 3 non-CMIN2 IPs.
+	hops := []Hop{
+		{TTL: 1, IP: net.ParseIP("192.168.1.1")},
+		{TTL: 2, IP: net.ParseIP("223.120.3.201")},
+		{TTL: 3, IP: net.ParseIP("10.0.0.1")},
+		{TTL: 4, IP: net.ParseIP("223.120.141.50")},
+		{TTL: 5, IP: net.ParseIP("8.8.8.8")},
+	}
+
+	// When
+	count := CountCMIN2Hops(hops)
+
+	// Then
+	if count != 2 {
+		t.Errorf("CountCMIN2Hops = %d, want 2", count)
+	}
+}
+
+func TestClassifyTraceResult_HighConfidence(t *testing.T) {
+	// Given: a trace result with 2 CMIN2 hops.
+	tr := &TraceResult{
+		TargetIP: net.ParseIP("23.249.17.25"),
+		Hops: []Hop{
+			{TTL: 9, IP: net.ParseIP("223.120.141.50")},
+			{TTL: 10, IP: net.ParseIP("223.120.130.34")},
+		},
+	}
+
+	// When
+	result := ClassifyTraceResult(tr)
+
+	// Then
+	if !result.IsCMIN2 {
+		t.Error("IsCMIN2 = false, want true")
+	}
+	if result.Confidence != 0.95 {
+		t.Errorf("Confidence = %v, want 0.95", result.Confidence)
+	}
+	if len(result.CMIN2Hops) != 2 {
+		t.Errorf("CMIN2Hops count = %d, want 2", len(result.CMIN2Hops))
+	}
+	if !result.TargetIP.Equal(net.ParseIP("23.249.17.25")) {
+		t.Errorf("TargetIP = %v, want 23.249.17.25", result.TargetIP)
+	}
+	if len(result.AllHops) != 2 {
+		t.Errorf("AllHops count = %d, want 2", len(result.AllHops))
+	}
+}
+
+func TestClassifyTraceResult_LowConfidence(t *testing.T) {
+	// Given: a trace result with 1 CMIN2 hop.
+	tr := &TraceResult{
+		TargetIP: net.ParseIP("10.0.0.1"),
+		Hops: []Hop{
+			{TTL: 1, IP: net.ParseIP("192.168.1.1")},
+			{TTL: 5, IP: net.ParseIP("223.120.3.201")},
+			{TTL: 6, IP: net.ParseIP("8.8.8.8")},
+		},
+	}
+
+	// When
+	result := ClassifyTraceResult(tr)
+
+	// Then
+	if !result.IsCMIN2 {
+		t.Error("IsCMIN2 = false, want true")
+	}
+	if result.Confidence != 0.70 {
+		t.Errorf("Confidence = %v, want 0.70", result.Confidence)
+	}
+	if len(result.CMIN2Hops) != 1 {
+		t.Errorf("CMIN2Hops count = %d, want 1", len(result.CMIN2Hops))
+	}
+}
+
+func TestClassifyTraceResult_NotCMIN2(t *testing.T) {
+	// Given: a trace result with no CMIN2 hops.
+	tr := &TraceResult{
+		TargetIP: net.ParseIP("1.1.1.1"),
+		Hops: []Hop{
+			{TTL: 1, IP: net.ParseIP("192.168.1.1")},
+			{TTL: 2, IP: net.ParseIP("1.1.1.1")},
+		},
+	}
+
+	// When
+	result := ClassifyTraceResult(tr)
+
+	// Then
+	if result.IsCMIN2 {
+		t.Error("IsCMIN2 = true, want false")
+	}
+	if result.Confidence != 0.05 {
+		t.Errorf("Confidence = %v, want 0.05", result.Confidence)
+	}
+	if len(result.CMIN2Hops) != 0 {
+		t.Errorf("CMIN2Hops count = %d, want 0", len(result.CMIN2Hops))
+	}
+}
+
+func TestClassifyTraceResult_EmptyHops(t *testing.T) {
+	// Given: a trace result with no hops.
+	tr := &TraceResult{
+		TargetIP: net.ParseIP("10.0.0.1"),
+	}
+
+	// When
+	result := ClassifyTraceResult(tr)
+
+	// Then
+	if result.IsCMIN2 {
+		t.Error("IsCMIN2 = true, want false for empty hops")
+	}
+	if result.Confidence != 0.05 {
+		t.Errorf("Confidence = %v, want 0.05", result.Confidence)
+	}
+	if len(result.CMIN2Hops) != 0 {
+		t.Errorf("CMIN2Hops count = %d, want 0", len(result.CMIN2Hops))
+	}
+}
+
+func TestCMIN2Prefixes_Contains(t *testing.T) {
+	// Given: the CMIN2 prefix table.
+	prefixes := CMIN2Prefixes
+
+	tests := []struct {
+		name string
+		ip   string
+		want bool
+	}{
+		{"in primary range", "223.120.3.201", true},
+		{"not in range", "1.1.1.1", false},
+		{"in secondary range", "223.119.1.1", true},
+		{"adjacent not in range", "223.118.1.1", false},
+		{"boundary low", "223.120.0.0", true},
+		{"boundary high", "223.120.255.255", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ip := net.ParseIP(tt.ip)
+			matched := false
+			for _, p := range prefixes {
+				if p.Contains(ip) {
+					matched = true
+					break
+				}
+			}
+			if matched != tt.want {
+				t.Errorf("Contains(%s) = %v, want %v", tt.ip, matched, tt.want)
+			}
+		})
+	}
+}

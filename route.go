@@ -538,4 +538,115 @@ func netIPsFromAddrs(addrs []netip.Addr) []net.IP {
 	return ips
 }
 
+// ────────────────────── CMIN2 detection ──────────────────────
+
+// CMIN2Prefixes defines the CIDR ranges for China Mobile's premium
+// CMIN2 network (AS58807).
+//
+// Primary range:   223.120.0.0/16  (core backbone)
+// Secondary range: 223.119.0.0/16  (extended range)
+//
+// Using /16 as a safe over-estimate to avoid false negatives.
+// Verified: 23.249.17.25 shows 223.120.141.50 at hop 9 and
+// 223.120.130.34 at hop 10.
+var CMIN2Prefixes = []net.IPNet{
+	{IP: net.IPv4(223, 120, 0, 0), Mask: net.CIDRMask(16, 32)},
+	{IP: net.IPv4(223, 119, 0, 0), Mask: net.CIDRMask(16, 32)},
+}
+
+// IsCMIN2 returns true if any hop in the trace result has an IP address
+// within the CMIN2 CIDR ranges.
+func (tr *TraceResult) IsCMIN2() bool {
+	for _, hop := range tr.Hops {
+		if hop.IP != nil {
+			for _, prefix := range CMIN2Prefixes {
+				if prefix.Contains(hop.IP) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// CMIN2Result holds the classification result for a single target IP.
+type CMIN2Result struct {
+	TargetIP   net.IP
+	IsCMIN2    bool
+	Confidence float64   // 0.95 for 2+ CMIN2 hops, 0.70 for 1 CMIN2 hop, 0.05 for 0 CMIN2 hops
+	CMIN2Hops  []Hop     // Hops that matched CMIN2 prefixes
+	AllHops    []Hop     // All hops from the traceroute
+}
+
+// CountCMIN2Hops returns the number of hops whose IP falls within any
+// CMIN2 prefix range.
+func CountCMIN2Hops(hops []Hop) int {
+	count := 0
+	for _, hop := range hops {
+		if hop.IP != nil {
+			for _, prefix := range CMIN2Prefixes {
+				if prefix.Contains(hop.IP) {
+					count++
+					break
+				}
+			}
+		}
+	}
+	return count
+}
+
+// ClassifyTraceResult classifies a single TraceResult for CMIN2 routing.
+func ClassifyTraceResult(tr *TraceResult) *CMIN2Result {
+	result := &CMIN2Result{
+		TargetIP: tr.TargetIP,
+		AllHops:  tr.Hops,
+	}
+
+	// Collect CMIN2 hops.
+	for _, hop := range tr.Hops {
+		if hop.IP != nil {
+			for _, prefix := range CMIN2Prefixes {
+				if prefix.Contains(hop.IP) {
+					result.CMIN2Hops = append(result.CMIN2Hops, hop)
+					break
+				}
+			}
+		}
+	}
+
+	if len(result.CMIN2Hops) > 0 {
+		result.IsCMIN2 = true
+		if len(result.CMIN2Hops) >= 2 {
+			result.Confidence = 0.95
+		} else {
+			result.Confidence = 0.70
+		}
+	} else {
+		result.IsCMIN2 = false
+		result.Confidence = 0.05
+	}
+
+	return result
+}
+
+// ClassifyAllResults classifies all trace results for CMIN2 routing and
+// returns only the CMIN2-positive results.
+func ClassifyAllResults(results map[string]*TraceResult) []*CMIN2Result {
+	var cmin2Results []*CMIN2Result
+	for _, tr := range results {
+		cr := ClassifyTraceResult(tr)
+		if cr.IsCMIN2 {
+			cmin2Results = append(cmin2Results, cr)
+		}
+	}
+	// Sort by TargetIP for deterministic output.
+	sort.Slice(cmin2Results, func(i, j int) bool {
+		if cmin2Results[i].TargetIP == nil || cmin2Results[j].TargetIP == nil {
+			return false
+		}
+		return cmin2Results[i].TargetIP.String() < cmin2Results[j].TargetIP.String()
+	})
+	return cmin2Results
+}
+
 

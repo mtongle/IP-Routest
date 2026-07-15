@@ -1,0 +1,23 @@
+TASK 3 EVIDENCE: route.go — CMIN2 detection logic
+===================================================
+Date: 2026-07-15
+Status: PASS
+
+FILES MODIFIED:
+- route.go (+111 lines appended)
+- route_test.go (+232 lines appended, 10 new tests)
+
+VERIFICATION:
+- go vet ./...: clean
+- go build ./...: success
+- go test -count=1 ./...: 73/73 PASS (0.028s)
+
+FUNCTIONALITY VERIFIED:
+- CMIN2Prefixes: 223.120.0.0/16 (primary) + 223.119.0.0/16 (secondary) ✓
+- IsCMIN2(): 223.120.141.50 → true, 1.1.1.1 → false, 223.119.1.1 → true ✓
+- Not matched: 223.118.1.1 → false (regular CMI) ✓
+- CountCMIN2Hops: 2 CMIN2 + 3 non-CMIN2 → count=2 ✓
+- ClassifyTraceResult: 2 hops → 0.95, 1 hop → 0.70, 0 hops → 0.05 ✓
+- ClassifyAllResults: filters + sorts by TargetIP ✓
+- Empty hops → IsCMIN2=false ✓
+- No TODOs/stubs/placeholders ✓
