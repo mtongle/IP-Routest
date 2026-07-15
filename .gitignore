@@ -1,3 +1,6 @@
+# Input IP data files
+ALL-*.txt
+
 # Built binary
 RouteTest
 /RouteTest
@@ -11,3 +14,16 @@ results/
 # OS files
 .DS_Store
 Thumbs.db
+
+# IDE / Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Go
+*.test
+*.out
+*.prof
+vendor/
+
