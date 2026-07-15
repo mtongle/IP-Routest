@@ -1,5 +1,7 @@
 # IP-Routest
 
+[![CI](https://github.com/tongle/IP-Routest/actions/workflows/ci.yml/badge.svg)](https://github.com/tongle/IP-Routest/actions/workflows/ci.yml)
+
 A Go tool for detecting China Mobile CMIN2 (AS58807) premium routing on a list of IPs, then benchmarking TCP latency and HTTP download speed.
 
 ## Workflow
@@ -9,6 +11,22 @@ A Go tool for detecting China Mobile CMIN2 (AS58807) premium routing on a list o
 3. **CMIN2 Detect** — Classifies routes that transit `223.120.0.0/16` or `223.119.0.0/16`.
 4. **TCPing** — Measures TCP handshake RTT on all ports for CMIN2-routed IPs.
 5. **Speed Test** — Downloads from `speed.cloudflare.com` via the top-N fastest IPs.
+
+## Download
+
+Pre-built binaries for Linux (amd64/arm64), macOS (amd64/arm64), and Windows (amd64) are
+available on the [Releases page](https://github.com/tongle/IP-Routest/releases).
+
+Each release includes `.tar.gz` archives (Linux/macOS), `.zip` archives (Windows), and a
+`checksums.txt` file for integrity verification.
+
+### Build from source
+
+```bash
+git clone https://github.com/tongle/IP-Routest.git
+cd IP-Routest
+go build -o IP-Routest .
+```
 
 ## Usage
 
