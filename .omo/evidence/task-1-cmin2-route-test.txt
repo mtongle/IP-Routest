@@ -1,0 +1,23 @@
+TASK 1 EVIDENCE: parse.go — IP file parser with full metadata
+=============================================================
+Date: 2026-07-15
+Status: PASS
+
+FILES CREATED:
+- parse.go (207 lines)
+- parse_test.go (635 lines, 31 tests)
+
+VERIFICATION:
+- go vet ./...: clean
+- go build ./...: success
+- go test -v -shuffle=on -count=1 ./...: 31/31 PASS (0.033s)
+
+ACCEPTANCE CRITERIA:
+- ParseLine("101.99.76.88:2053#NL") → IP=101.99.76.88, Port=2053, Country=NL ✓
+- Full file: len(UniqueIPs()) == 12992 ✓
+- Known IPs (101.99.76.88, 23.249.17.25) present ✓
+- Empty file → empty map ✓
+- Malformed lines skipped with warning ✓
+- map[netip.Addr] used (not map[net.IP]) ✓
+- No external dependencies ✓
+- No TODOs/stubs/placeholders ✓
