@@ -9,6 +9,8 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"runtime"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -205,7 +207,7 @@ func NewCheckpointManager(dedupMode string) *CheckpointManager {
 		dedupMode = "/24"
 	}
 	return &CheckpointManager{
-		checkpointPath: "/tmp/.cmin2-trace-checkpoint.json",
+		checkpointPath: filepath.Join(os.TempDir(), ".cmin2-trace-checkpoint.json"),
 		dedupMode:      dedupMode,
 	}
 }
@@ -488,11 +490,22 @@ func (tr *TracerouteRunner) Run(ctx context.Context, ips []net.IP, resume bool) 
 	return results
 }
 
+// tracerouteCmd returns the platform-specific traceroute command name and arguments.
+func tracerouteCmd(ipStr string, goos string) (string, []string) {
+	switch goos {
+	case "windows":
+		return "tracert", []string{"-d", "-h", "30", ipStr}
+	default:
+		return "traceroute", []string{"-n", "-m", "30", "-q", "1", ipStr}
+	}
+}
+
 // runSingle executes traceroute against one IP and parses the output.
 func (tr *TracerouteRunner) runSingle(ctx context.Context, ip net.IP) *TraceResult {
 	ipStr := ip.String()
 
-	cmd := exec.CommandContext(ctx, "traceroute", "-n", "-m", "30", "-q", "1", ipStr)
+	cmdName, cmdArgs := tracerouteCmd(ipStr, runtime.GOOS)
+	cmd := exec.CommandContext(ctx, cmdName, cmdArgs...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		// exec.CommandContext kills the process on context cancel, which
