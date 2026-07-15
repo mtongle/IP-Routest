@@ -1,0 +1,105 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }}/${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - os: linux
+            arch: amd64
+            runner: ubuntu-latest
+          - os: linux
+            arch: arm64
+            runner: ubuntu-latest
+          - os: darwin
+            arch: amd64
+            runner: macos-latest
+          - os: darwin
+            arch: arm64
+            runner: macos-latest
+          - os: windows
+            arch: amd64
+            runner: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Build binary
+        shell: bash
+        env:
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+        run: |
+          EXE=""
+          if [ "${{ matrix.os }}" = "windows" ]; then
+            EXE=".exe"
+          fi
+          BINARY_NAME="IP-Routest_${{ github.ref_name }}_${{ matrix.os }}_${{ matrix.arch }}${EXE}"
+          go build -trimpath -ldflags="-s -w" -o "${BINARY_NAME}" .
+
+      - name: Create archive
+        shell: bash
+        run: |
+          BINARY_NAME="IP-Routest_${{ github.ref_name }}_${{ matrix.os }}_${{ matrix.arch }}"
+          if [ "${{ matrix.os }}" = "windows" ]; then
+            ARCHIVE_NAME="${BINARY_NAME}.zip"
+            7z a -tzip "${ARCHIVE_NAME}" "${BINARY_NAME}.exe"
+          else
+            ARCHIVE_NAME="${BINARY_NAME}.tar.gz"
+            tar czf "${ARCHIVE_NAME}" "${BINARY_NAME}"
+          fi
+          echo "archive=${ARCHIVE_NAME}" >> "$GITHUB_OUTPUT"
+        id: archive
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: IP-Routest_${{ github.ref_name }}_${{ matrix.os }}_${{ matrix.arch }}
+          path: ${{ steps.archive.outputs.archive }}
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Generate SHA256 checksums
+        shell: bash
+        run: |
+          cd artifacts
+          find . -type f \( -name '*.tar.gz' -o -name '*.zip' \) | sort | while read -r f; do
+            sha256sum "$f" >> ../checksums.txt
+          done
+          mv ../checksums.txt .
+          echo "Generated checksums:"
+          cat checksums.txt
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: |
+            artifacts/*.tar.gz
+            artifacts/*.zip
+            artifacts/checksums.txt
