@@ -746,6 +746,46 @@ func TestCountCN2GIAHops(t *testing.T) {
 	}
 }
 
+// ────────────────────── TracerouteCmd tests ──────────────────────
+
+func TestTracerouteCmd(t *testing.T) {
+	tests := []struct {
+		name    string
+		goos    string
+		ip      string
+		wantCmd string
+		wantArgs []string
+	}{
+		{name: "linux",   goos: "linux",   ip: "1.2.3.4", wantCmd: "traceroute", wantArgs: []string{"-n", "-m", "30", "-q", "1", "1.2.3.4"}},
+		{name: "darwin",  goos: "darwin",  ip: "1.2.3.4", wantCmd: "traceroute", wantArgs: []string{"-n", "-m", "30", "-q", "1", "1.2.3.4"}},
+		{name: "freebsd", goos: "freebsd", ip: "1.2.3.4", wantCmd: "traceroute", wantArgs: []string{"-n", "-m", "30", "-q", "1", "1.2.3.4"}},
+		{name: "windows", goos: "windows", ip: "1.2.3.4", wantCmd: "tracert",    wantArgs: []string{"-d", "-h", "30", "1.2.3.4"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotCmd, gotArgs := tracerouteCmd(tt.ip, tt.goos)
+			if gotCmd != tt.wantCmd {
+				t.Errorf("tracerouteCmd(%q, %q) cmd = %q, want %q", tt.ip, tt.goos, gotCmd, tt.wantCmd)
+			}
+			if !equalStringSlice(gotArgs, tt.wantArgs) {
+				t.Errorf("tracerouteCmd(%q, %q) args = %v, want %v", tt.ip, tt.goos, gotArgs, tt.wantArgs)
+			}
+		})
+	}
+}
+
+func equalStringSlice(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestClassifyRouteResult_CN2GIA_HighConfidence(t *testing.T) {
 	// Given: a trace result with 2 CN2GIA hops.
 	tr := &TraceResult{
