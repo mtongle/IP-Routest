@@ -1,0 +1,25 @@
+TASK 2 EVIDENCE: route.go — Traceroute runner with checkpoint/resume
+=====================================================================
+Date: 2026-07-15
+Status: PASS
+
+FILES CREATED:
+- route.go (541 lines)
+- route_test.go (461 lines, 20 tests)
+
+VERIFICATION:
+- go vet ./...: clean
+- go build ./...: success
+- go test -v -shuffle=on -count=1 ./...: 53/53 PASS (0.026s)
+
+FUNCTIONALITY VERIFIED:
+- ParseHopLine: standard, no-response (*), unreachable (!H/!N/!X), header → all correct ✓
+- DedupBy24: 4 IPs across 2 /24s → 2 IPs, lowest per group ✓
+- Checkpoint: save/load/reload → IP marked completed ✓
+- Checkpoint atomic write: tmp file + Rename pattern ✓
+- Checkpoint resume: 3 saved IPs → all marked completed ✓
+- Checkpoint clear: file removed, Load returns nil ✓
+- TracerouteRunner defaults: 20 concurrent, 10s cooldown, 30s timeout ✓
+- ParseTracerouteOutput: complete/incomplete/empty output ✓
+- ipsSame24: same subnet=true, different=false, IPv6=false ✓
+- No TODOs/stubs/placeholders ✓
